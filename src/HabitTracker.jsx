@@ -371,7 +371,7 @@ export default function HabitTracker() {
               <button onClick={() => setShowLoginModal(false)} className="text-gray-500"><X className="w-5 h-5" /></button>
             </div>
 
-            <p className="text-sm text-gray-600 mb-3">Enter a user id to create or load your personal tracker. (Future: Google / OAuth can be added here.)</p>
+            <p className="text-sm text-gray-600 mb-3">Enter a user id to create or load your personal tracker.</p>
 
             <input
               type="text"
@@ -388,10 +388,9 @@ export default function HabitTracker() {
             </div>
 
             <div className="mt-3 text-xs text-gray-500">
-              <p>Future integrations:</p>
+              <p>Attention</p>
               <ul className="list-disc ml-5">
-                <li>Google / OAuth — map provider user ID to <code>userId</code></li>
-                <li>Supabase / MongoDB — store/retrieve habits & sleep per user</li>
+                <li>Your local browser storage will be used for saving progress.</li>
               </ul>
             </div>
           </div>
