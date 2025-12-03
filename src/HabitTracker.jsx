@@ -1,11 +1,18 @@
+// src/HabitTracker.jsx
 import React, { useState, useEffect } from 'react';
-import { Calendar, TrendingUp, Award, Plus, X, Check, Moon, BarChart3, User, LogIn, LogOut, Info } from 'lucide-react';
-import { LineChart as RechartsLine, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import {
+  Calendar, TrendingUp, Award, Plus, X, Check, Moon,
+  BarChart3, User, LogIn, LogOut, Info, Menu
+} from 'lucide-react';
+import {
+  LineChart as RechartsLine, Line, BarChart, Bar,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
+} from 'recharts';
+// auth helpers (your implementation)
+import { setAuthToken, getAuthToken, authFetch } from './api';
 
 /* ---------------------------
-  Small polyfill for window.storage so app runs in browser.
-  - When you integrate a real DB / backend, replace calls to window.storage
-    with API calls (e.g., Supabase, REST endpoints, Firebase, etc.)
+  localStorage polyfill for window.storage (keeps app working in browser)
 ---------------------------- */
 if (typeof window !== 'undefined' && !window.storage) {
   window.storage = {
@@ -32,21 +39,22 @@ if (typeof window !== 'undefined' && !window.storage) {
 
 /* ---------------------------
   HabitTracker Component
-  - Top-left: Login / Logout buttons in nav bar
-  - Shows About section for non-logged-in users
-  - After login, shows personalized tracker
-  - Clear comments mark scalability points for auth & DB
----------------------------- */
+  - Day-wise entries:
+    * habitsDefs: array of habit definitions { id, name, color, createdAt }
+    * entries: array of day entries { date:'YYYY-MM-DD', completedHabits: [ids], sleep: {hours, quality}, updatedAt }
+    * todayEntry: the entry for today (editable). All other days read-only (locked).
+----------------------------*/
 export default function HabitTracker() {
   // user / auth state
   const [userId, setUserId] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   // app data
-  const [habits, setHabits] = useState([]);
-  const [sleepData, setSleepData] = useState([]);
+  const [habitsDefs, setHabitsDefs] = useState([]); // habit definitions
+  const [entries, setEntries] = useState([]);       // day-wise entries
+  const [todayEntry, setTodayEntry] = useState({ date: getTodayString(), completedHabits: [], sleep: { hours: null, quality: null } });
 
-  // UI state
+  // UI
   const [showAddHabit, setShowAddHabit] = useState(false);
   const [newHabitName, setNewHabitName] = useState('');
   const [selectedColor, setSelectedColor] = useState('#3b82f6');
@@ -57,8 +65,68 @@ export default function HabitTracker() {
   const [saveStatus, setSaveStatus] = useState('');
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 640 : false);
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const colors = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899'];
+
+  /* ---------------------------
+    Capture token from backend redirect (Google OAuth / JWT)
+    If token found: persist & load user data immediately
+  ----------------------------*/
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      let tokenFromUrl = params.get('token');
+      if (!tokenFromUrl && window.location.hash) {
+        const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+        tokenFromUrl = hashParams.get('token');
+      }
+
+      if (tokenFromUrl) {
+        setAuthToken(tokenFromUrl);
+        setIsLoggedIn(true);
+        (async () => {
+          try {
+            const data = await authFetch('/api/user/data', { method: 'GET' });
+            setHabitsDefs(data.habits || []);
+            setEntries(data.entries || []);
+            setTodayEntry(data.todayEntry || { date: getTodayString(), completedHabits: [], sleep: { hours: null, quality: null } });
+            setUserId(data.userInfo?.email || data.userInfo?.name || '');
+          } catch (err) {
+            console.error('Failed to load user data after token capture', err);
+            setAuthToken(null);
+            setIsLoggedIn(false);
+          }
+        })();
+        // clean url
+        const cleanUrl = window.location.pathname + window.location.hash.replace(/(\?token=[^&]*)/, '');
+        window.history.replaceState({}, document.title, cleanUrl);
+        return;
+      }
+    } catch (e) {
+      console.error('token capture error', e);
+    }
+
+    // fallback: check persisted token
+    const existing = getAuthToken();
+    if (existing) {
+      setIsLoggedIn(true);
+      (async () => {
+        try {
+          const data = await authFetch('/api/user/data', { method: 'GET' });
+          setHabitsDefs(data.habits || []);
+          setEntries(data.entries || []);
+          setTodayEntry(data.todayEntry || { date: getTodayString(), completedHabits: [], sleep: { hours: null, quality: null } });
+          setUserId(data.userInfo?.email || data.userInfo?.name || '');
+        } catch (err) {
+          console.error('Failed to fetch user data', err);
+          setAuthToken(null);
+          setIsLoggedIn(false);
+        }
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // responsive listener
   useEffect(() => {
@@ -67,167 +135,227 @@ export default function HabitTracker() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  // Load data after login
+  // load / auto-save: when logged in & userId present
   useEffect(() => {
-    if (isLoggedIn && userId) {
-      loadUserData();
-    }
+    if (isLoggedIn && userId) loadUserData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoggedIn, userId]);
 
-  // Auto-save whenever habits or sleepData change
+  // We persist only when entries or habitsDefs change and user logged in
   useEffect(() => {
-    if (isLoggedIn && userId && (habits.length > 0 || sleepData.length > 0)) {
+    if (isLoggedIn && userId) {
+      // Optionally debounce / batch in the future; for now save when changes happen
+      // Note: saving whole arrays to /api/user/data as designed on server
       saveUserData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [habits, sleepData]);
+  }, [entries, habitsDefs]);
 
   /* ---------------------------
     Data layer
-    - CURRENT: window.storage (localStorage polyfill).
-    - SCALABILITY NOTES:
-      * Replace loadUserData and saveUserData internals with calls to your backend:
-        - For Supabase: call supabase.from('habits').select(...) & supabase.from('habits').upsert(...)
-        - For MongoDB: call your API endpoints that read/write the DB
-        - For Notion: call Notion APIs and map schema
-      * For auth: integrate Google Sign-In and use returned user ID / email as `userId`.
-      * Keep the public helper names (loadUserData/saveUserData) so swapping implementations is straightforward.
+    - loadUserData: fetch { habits, entries, todayEntry, userInfo }
+    - saveUserData: write full data (or you can call saveEntryToServer for single-day updates)
   ----------------------------*/
   const loadUserData = async () => {
     try {
-      // Example: local storage retrieval
-      const habitsResult = await window.storage.get(`habits:${userId}`);
-      const sleepResult = await window.storage.get(`sleep:${userId}`);
-
-      if (habitsResult && habitsResult.value) {
-        setHabits(JSON.parse(habitsResult.value));
-      } else {
-        // default starter habits for new users
-        setHabits([
-          { id: 1, name: 'Morning Exercise', color: '#3b82f6', streak: 0, completed: [] },
-          { id: 2, name: 'Read 30 Minutes', color: '#10b981', streak: 0, completed: [] },
-          { id: 3, name: 'Drink 8 Glasses Water', color: '#8b5cf6', streak: 0, completed: [] }
-        ]);
-      }
-
-      if (sleepResult && sleepResult.value) {
-        setSleepData(JSON.parse(sleepResult.value));
-      }
-
-      setSaveStatus('Data loaded successfully!');
+      const data = await authFetch('/api/user/data', { method: 'GET' });
+      setHabitsDefs(data.habits || []);
+      setEntries(data.entries || []);
+      setTodayEntry(data.todayEntry || { date: getTodayString(), completedHabits: [], sleep: { hours: null, quality: null } });
+      setSaveStatus('Data loaded from server');
+      setTimeout(() => setSaveStatus(''), 1500);
+    } catch (err) {
+      console.error('Error loading data:', err);
+      setSaveStatus('⚠ Load failed (server)');
       setTimeout(() => setSaveStatus(''), 2000);
-    } catch (error) {
-      console.error('Error loading data:', error);
-      setHabits([
-        { id: 1, name: 'Morning Exercise', color: '#3b82f6', streak: 0, completed: [] },
-        { id: 2, name: 'Read 30 Minutes', color: '#10b981', streak: 0, completed: [] },
-        { id: 3, name: 'Drink 8 Glasses Water', color: '#8b5cf6', streak: 0, completed: [] }
-      ]);
     }
   };
 
   const saveUserData = async () => {
     try {
-      // Example: local storage set
-      await window.storage.set(`habits:${userId}`, JSON.stringify(habits));
-      await window.storage.set(`sleep:${userId}`, JSON.stringify(sleepData));
-      setSaveStatus('✓ Saved');
+      await authFetch('/api/user/data', {
+        method: 'POST',
+        body: JSON.stringify({
+          // When saving full user data we send habits and entries
+          habits: habitsDefs,
+          // NOTE: server expects entries as array in new schema
+          // we send it so server persists day-wise entries
+          entries
+        })
+      });
+      setSaveStatus('✓ Saved to server');
+      setTimeout(() => setSaveStatus(''), 1200);
+    } catch (err) {
+      console.error('Error saving data:', err);
+      setSaveStatus('⚠ Save failed (server)');
       setTimeout(() => setSaveStatus(''), 2000);
-    } catch (error) {
-      console.error('Error saving data:', error);
+    }
+  };
+
+  /* ---------------------------
+    Save a single day entry (used on toggles / sleep save)
+    - posts date, completedHabits, sleep, and optionally current habit defs
+  ----------------------------*/
+  const saveEntryToServer = async (entry) => {
+    try {
+      await authFetch('/api/user/data', {
+        method: 'POST',
+        body: JSON.stringify({
+          date: entry.date,
+          completedHabits: entry.completedHabits,
+          sleep: entry.sleep,
+          habits: habitsDefs // include defs so server stays in sync (optional)
+        })
+      });
+      setSaveStatus('✓ Saved');
+      setTimeout(() => setSaveStatus(''), 1000);
+    } catch (err) {
+      console.error('Save failed', err);
       setSaveStatus('⚠ Save failed');
-      setTimeout(() => setSaveStatus(''), 3000);
+      setTimeout(() => setSaveStatus(''), 2000);
     }
   };
 
   /* ---------------------------
     Auth helpers
-    - CURRENT: simple modal-based username input (userId)
-    - SCALABILITY NOTES:
-      * Replace handleLoginModalConfirm with real OAuth flow:
-        - Google: use Google Sign-In, get user info → setUserId(user.email || user.id)
-        - Then call loadUserData() to sync user data from DB
-      * Consider storing auth tokens in secure HTTP-only cookies or browser secure storage.
   ----------------------------*/
   const handleLoginModalConfirm = (id) => {
     if (id && id.trim()) {
       setUserId(id.trim());
       setIsLoggedIn(true);
       setShowLoginModal(false);
+      // Note: for local username-only flow you may persist on server in the future.
     }
   };
 
   const handleLogout = () => {
-    // SCALING: when using server-backed auth, also call signOut endpoint / revoke token
+    setAuthToken(null);
     setIsLoggedIn(false);
     setUserId('');
-    setHabits([]);
-    setSleepData([]);
+    setHabitsDefs([]);
+    setEntries([]);
+    setTodayEntry({ date: getTodayString(), completedHabits: [], sleep: { hours: null, quality: null } });
   };
 
   /* ---------------------------
-    Habit & Sleep logic (unchanged)
+    Date helpers & locking
   ----------------------------*/
-  const getTodayString = () => new Date().toISOString().split('T')[0];
+  function getTodayString() {
+    return new Date().toISOString().split('T')[0];
+  }
 
-  const isCompletedToday = (habit) => habit.completed.includes(getTodayString());
+  function isDateLocked(dateString) {
+    return dateString !== getTodayString();
+  }
 
-  const toggleHabit = (habitId) => {
-    setHabits(habits.map(habit => {
-      if (habit.id === habitId) {
-        const today = getTodayString();
-        const completed = isCompletedToday(habit)
-          ? habit.completed.filter(date => date !== today)
-          : [...habit.completed, today];
+  /* ---------------------------
+    Habit operations (definitions)
+  ----------------------------*/
+  const addHabit = async () => {
+    if (!newHabitName.trim()) return;
+    // generate id; use crypto if available; fallback to timestamp
+    const id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString();
+    const newDef = { id, name: newHabitName.trim(), color: selectedColor, createdAt: new Date() };
+    const updatedDefs = [...habitsDefs, newDef];
+    setHabitsDefs(updatedDefs);
+    setNewHabitName('');
+    setShowAddHabit(false);
+    // Persist habit defs to server quickly
+    try {
+      await authFetch('/api/user/data', { method: 'POST', body: JSON.stringify({ habits: updatedDefs }) });
+      setSaveStatus('✓ Habit added');
+      setTimeout(() => setSaveStatus(''), 1000);
+    } catch (err) {
+      console.error('Failed to save habit defs', err);
+      setSaveStatus('⚠ Save failed');
+      setTimeout(() => setSaveStatus(''), 2000);
+    }
+  };
 
-        return { ...habit, completed, streak: calculateStreak(completed) };
-      }
-      return habit;
+  const deleteHabit = async (habitId) => {
+    // Remove habit definition and remove references in entries
+    const updatedDefs = habitsDefs.filter(h => h.id !== habitId);
+    const updatedEntries = entries.map(e => ({
+      ...e,
+      completedHabits: (e.completedHabits || []).filter(id => id !== habitId)
     }));
-  };
-
-  const calculateStreak = (completedDates) => {
-    if (completedDates.length === 0) return 0;
-    const sorted = [...completedDates].sort().reverse();
-    let streak = 0;
-    const today = new Date();
-    for (let i = 0; i < sorted.length; i++) {
-      const date = new Date(sorted[i]);
-      const diffDays = Math.floor((today - date) / (1000 * 60 * 60 * 24));
-      if (diffDays === i) streak++;
-      else break;
+    setHabitsDefs(updatedDefs);
+    setEntries(updatedEntries);
+    // Update todayEntry too
+    if (todayEntry && todayEntry.completedHabits.includes(habitId)) {
+      const updatedToday = { ...todayEntry, completedHabits: todayEntry.completedHabits.filter(id => id !== habitId) };
+      setTodayEntry(updatedToday);
+      await saveEntryToServer(updatedToday);
     }
-    return streak;
-  };
-
-  const addHabit = () => {
-    if (newHabitName.trim()) {
-      setHabits([...habits, { id: Date.now(), name: newHabitName, color: selectedColor, streak: 0, completed: [] }]);
-      setNewHabitName('');
-      setShowAddHabit(false);
-    }
-  };
-
-  const deleteHabit = (habitId) => setHabits(habits.filter(h => h.id !== habitId));
-
-  const addSleepEntry = () => {
-    if (sleepHours !== '') {
-      const today = getTodayString();
-      const existingEntry = sleepData.find(entry => entry.date === today);
-      if (existingEntry) {
-        setSleepData(sleepData.map(entry => entry.date === today ? { ...entry, hours: parseFloat(sleepHours), quality: sleepQuality } : entry));
-      } else {
-        setSleepData([...sleepData, { date: today, hours: parseFloat(sleepHours), quality: sleepQuality }]);
-      }
-      setSleepHours('');
-      setSleepQuality(3);
-      setShowSleepModal(false);
+    try {
+      await authFetch('/api/user/data', {
+        method: 'POST',
+        body: JSON.stringify({ habits: updatedDefs, entries: updatedEntries })
+      });
+      setSaveStatus('✓ Habit removed');
+      setTimeout(() => setSaveStatus(''), 1000);
+    } catch (err) {
+      console.error('Failed to persist deletion', err);
+      setSaveStatus('⚠ Save failed');
+      setTimeout(() => setSaveStatus(''), 2000);
     }
   };
 
   /* ---------------------------
-    Helpers for charts / UI
+    Toggle habit for TODAY only
+    - updates todayEntry, entries state and persists day entry
+  ----------------------------*/
+  const toggleHabit = (habitId) => {
+    const today = getTodayString();
+    if (todayEntry.date !== today) {
+      // ensure todayEntry date set (in case of stale)
+      setTodayEntry({ date: today, completedHabits: [], sleep: { hours: null, quality: null } });
+    }
+
+    const isCompleted = (todayEntry.completedHabits || []).includes(habitId);
+
+    const newCompleted = isCompleted
+      ? todayEntry.completedHabits.filter(id => id !== habitId)
+      : [...(todayEntry.completedHabits || []), habitId];
+
+    const updated = { ...todayEntry, date: today, completedHabits: newCompleted, updatedAt: new Date() };
+    setTodayEntry(updated);
+
+    // update entries array (replace today's)
+    setEntries(prev => {
+      const filtered = prev.filter(e => e.date !== today);
+      return [...filtered, updated];
+    });
+
+    // persist single day entry
+    saveEntryToServer(updated);
+  };
+
+  /* ---------------------------
+    Sleep saving for TODAY
+  ----------------------------*/
+  const addSleepEntry = () => {
+    if (sleepHours === '') return;
+    const hoursNum = parseFloat(sleepHours);
+    const today = getTodayString();
+
+    const updated = { ...todayEntry, date: today, sleep: { hours: hoursNum, quality: sleepQuality }, updatedAt: new Date() };
+    setTodayEntry(updated);
+
+    setEntries(prev => {
+      const filtered = prev.filter(e => e.date !== today);
+      return [...filtered, updated];
+    });
+
+    setSleepHours('');
+    setSleepQuality(3);
+    setShowSleepModal(false);
+
+    saveEntryToServer(updated);
+  };
+
+  /* ---------------------------
+    Helpers for analytics & UI based on entries + habit defs
   ----------------------------*/
   const getLast7Days = () => {
     const days = [];
@@ -253,51 +381,93 @@ export default function HabitTracker() {
   const getDateString = (date) => date.toISOString().split('T')[0];
 
   const completionRate = () => {
-    if (habits.length === 0) return 0;
-    const completedToday = habits.filter(isCompletedToday).length;
-    return Math.round((completedToday / habits.length) * 100);
+    if (!habitsDefs || habitsDefs.length === 0) return 0;
+    const today = getTodayString();
+    const entry = entries.find(e => e.date === today) || todayEntry;
+    const completedToday = (entry.completedHabits || []).length;
+    return Math.round((completedToday / habitsDefs.length) * 100);
   };
 
-  const totalStreak = habits.reduce((sum, habit) => sum + habit.streak, 0);
-  const getTodaySleep = () => sleepData.find(entry => entry.date === getTodayString());
+  const calculateStreakFromEntries = (habitId) => {
+    // Count consecutive days up to today where habitId is present
+    const days = getLast30Days(); // check up to last 30 days
+    let streak = 0;
+    const today = new Date();
+    for (let i = 0; i < days.length; i++) {
+      const d = days[days.length - 1 - i]; // backward from today
+      const ds = getDateString(d);
+      const entry = entries.find(e => e.date === ds) || (ds === todayEntry.date ? todayEntry : null);
+      if (entry && (entry.completedHabits || []).includes(habitId)) {
+        streak++;
+      } else {
+        // break streak on first missed day
+        break;
+      }
+    }
+    return streak;
+  };
+
+  const totalStreak = () => {
+    return habitsDefs.reduce((sum, h) => sum + calculateStreakFromEntries(h.id), 0);
+  };
+
+  const getTodaySleep = () => {
+    const t = getTodayString();
+    const e = entries.find(en => en.date === t) || todayEntry;
+    return e ? e.sleep : { hours: null, quality: null };
+  };
+
   const getAverageSleep = () => {
-    if (sleepData.length === 0) return 0;
-    const total = sleepData.reduce((sum, entry) => sum + entry.hours, 0);
-    return (total / sleepData.length).toFixed(1);
+    const withSleep = entries.filter(e => e.sleep && e.sleep.hours != null);
+    if (withSleep.length === 0) return 0;
+    const total = withSleep.reduce((s, e) => s + e.sleep.hours, 0);
+    return (total / withSleep.length).toFixed(1);
   };
 
   const prepareCompletionData = () => {
-    const last30Days = getLast30Days();
-    return last30Days.map(date => {
-      const dateString = getDateString(date);
-      const completed = habits.filter(habit => habit.completed.includes(dateString)).length;
-      const rate = habits.length > 0 ? Math.round((completed / habits.length) * 100) : 0;
-      return { date: formatDate(date), completionRate: rate, completed, total: habits.length };
+    const last30 = getLast30Days();
+    return last30.map(d => {
+      const ds = getDateString(d);
+      const entry = entries.find(e => e.date === ds);
+      const completedCount = entry ? entry.completedHabits.length : 0;
+      const rate = habitsDefs.length ? Math.round((completedCount / habitsDefs.length) * 100) : 0;
+      return { date: formatDate(d), completionRate: rate, completed: completedCount, total: habitsDefs.length };
     });
   };
 
   const prepareSleepData = () => {
-    const last30Days = getLast30Days();
-    return last30Days.map(date => {
-      const dateString = getDateString(date);
-      const entry = sleepData.find(e => e.date === dateString);
-      return { date: formatDate(date), hours: entry ? entry.hours : null, quality: entry ? entry.quality : null };
-    }).filter(d => d.hours !== null);
+    const list = entries
+      .filter(e => e.sleep && e.sleep.hours != null)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map(e => ({ date: formatDate(new Date(e.date)), hours: e.sleep.hours, quality: e.sleep.quality }));
+    return list;
   };
 
-  const prepareHabitBreakdown = () => habits.map(habit => ({ name: habit.name, completed: habit.completed.length, streak: habit.streak, color: habit.color }));
+  const prepareHabitBreakdown = () => {
+    return habitsDefs.map(h => {
+      const total = entries.reduce((s, e) => s + ((e.completedHabits || []).includes(h.id) ? 1 : 0), 0);
+      return { name: h.name, completed: total, streak: calculateStreakFromEntries(h.id), color: h.color };
+    });
+  };
 
   const prepareWeeklyComparison = () => {
+    // 4 weeks (current week = Week 4)
     const weeks = [];
     for (let w = 3; w >= 0; w--) {
-      const weekData = { week: `Week ${4 - w}` };
-      habits.forEach(habit => {
-        const count = habit.completed.filter(dateStr => {
-          const date = new Date(dateStr);
-          const daysAgo = Math.floor((new Date() - date) / (1000 * 60 * 60 * 24));
-          return daysAgo >= w * 7 && daysAgo < (w + 1) * 7;
-        }).length;
-        weekData[habit.name] = count;
+      const weekLabel = `Week ${4 - w}`;
+      const weekStart = new Date();
+      weekStart.setDate(weekStart.getDate() - w * 7);
+      const weekData = { week: weekLabel };
+      habitsDefs.forEach(h => {
+        const count = entries.reduce((s, e) => {
+          const d = new Date(e.date);
+          const daysAgo = Math.floor((new Date() - d) / (1000 * 60 * 60 * 24));
+          if (daysAgo >= w * 7 && daysAgo < (w + 1) * 7) {
+            return s + ((e.completedHabits || []).includes(h.id) ? 1 : 0);
+          }
+          return s;
+        }, 0);
+        weekData[h.name] = count;
       });
       weeks.push(weekData);
     }
@@ -309,173 +479,162 @@ export default function HabitTracker() {
   const smallChartHeight = isMobile ? 140 : 200;
 
   /* ---------------------------
-    UI: Navigation bar (login/logout on left)
-    - Left side: brand + Login/Logout
-    - Right side: optional quick actions
+    UI / JSX (keeps your layout but uses habitsDefs & entries)
   ----------------------------*/
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 p-3 sm:p-6">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50">
       {/* NAV */}
-      <nav className="max-w-6xl mx-auto flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          {/* Left corner: Login / Logout */}
-          {!isLoggedIn ? (
-            <>
-              <button
-                onClick={() => setShowLoginModal(true)}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
+      <header className="bg-white/70 backdrop-blur-sm border-b border-gray-100 sticky top-0 z-40">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center gap-4">
+              {/* <button
+                className="p-2 rounded-md hover:bg-gray-100"
+                onClick={() => setMobileMenuOpen(v => !v)}
+                aria-label="Open menu"
               >
-                <LogIn className="w-4 h-4" />
-                <span className="hidden sm:inline">Login</span>
-              </button>
+                <Menu className="w-5 h-5" />
+              </button> */}
 
-              {/* About button */}
-              <button
-                onClick={() => window.scrollTo({ top: 200, behavior: 'smooth' })}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white text-gray-700 border border-gray-200 hover:shadow-sm"
-              >
-                <Info className="w-4 h-4" />
-                <span className="hidden sm:inline">About</span>
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100 text-gray-800 hover:bg-gray-200"
-              >
-                <LogOut className="w-4 h-4" />
-                <span className="hidden sm:inline">Logout</span>
-              </button>
-
-              <div className="px-3 py-2 rounded-lg bg-white border border-gray-200 text-sm text-gray-700">
-                <User className="inline w-4 h-4 mr-2" />
-                {userId}
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Right area: App title / quick actions */}
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg sm:text-2xl font-bold text-gray-800">Habit Tracker</h1>
-        </div>
-      </nav>
-
-      {/* LOGIN MODAL */}
-      {showLoginModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-40 p-4">
-          <div className="bg-white rounded-xl p-4 max-w-sm w-full">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-lg font-semibold">Login / Start</h3>
-              <button onClick={() => setShowLoginModal(false)} className="text-gray-500"><X className="w-5 h-5" /></button>
-            </div>
-
-            <p className="text-sm text-gray-600 mb-3">Enter a user id to create or load your personal tracker.</p>
-
-            <input
-              type="text"
-              placeholder="username or email"
-              value={userId}
-              onChange={(e) => setUserId(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-3 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              onKeyDown={(e) => e.key === 'Enter' && handleLoginModalConfirm(userId)}
-            />
-
-            <div className="flex gap-2">
-              <button onClick={() => handleLoginModalConfirm(userId)} className="flex-1 bg-indigo-600 text-white py-2 rounded-lg">Continue</button>
-              <button onClick={() => setShowLoginModal(false)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg">Cancel</button>
-            </div>
-
-            <div className="mt-3 text-xs text-gray-500">
-              <p>Attention</p>
-              <ul className="list-disc ml-5">
-                <li>Your local browser storage will be used for saving progress.</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MAIN */}
-      <div className="max-w-6xl mx-auto">
-        {/* If not logged in: show About section */}
-        {!isLoggedIn ? (
-          <div className="bg-gradient-to-br from-indigo-50 via-white to-purple-50 rounded-2xl shadow-lg p-6 sm:p-8 border border-indigo-100 mb-6 relative overflow-hidden">
-            {/* Decorative background elements */}
-            <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-100 rounded-full opacity-20 blur-3xl -mr-32 -mt-32"></div>
-            <div className="absolute bottom-0 left-0 w-48 h-48 bg-purple-100 rounded-full opacity-20 blur-3xl -ml-24 -mb-24"></div>
-            
-            <div className="relative z-10">
-              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-                <div className="flex-1">
-                  <div className="inline-flex items-center gap-2 bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-xs font-medium mb-3">
-                    <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
-                    Privacy-First Tracking
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-10 h-10 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold">
+                    {/* logo placeholder */}
+                    <img src="1.svg" alt="" />
                   </div>
-                  <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3">
-                    Build Better Habits, One Day at a Time
-                  </h2>
-                  <p className="text-gray-600 mb-4 leading-relaxed">
-                    A minimalist tracker designed for consistency. No accounts needed—just pick a username and start building streaks that matter.
-                  </p>
-                  
-                  <div className="grid sm:grid-cols-3 gap-3">
-                    <div className="flex items-start gap-3 bg-white bg-opacity-60 backdrop-blur-sm p-3 rounded-lg border border-indigo-100">
-                      <div className="w-8 h-8 bg-indigo-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <span className="text-indigo-600 text-lg">🎯</span>
-                      </div>
-                      <div>
-                        <p className="font-semibold text-gray-800 text-sm">Daily Habits</p>
-                        <p className="text-xs text-gray-600">Track & build streaks</p>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-start gap-3 bg-white bg-opacity-60 backdrop-blur-sm p-3 rounded-lg border border-purple-100">
-                      <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <span className="text-purple-600 text-lg">😴</span>
-                      </div>
-                      <div>
-                        <p className="font-semibold text-gray-800 text-sm">Sleep Logging</p>
-                        <p className="text-xs text-gray-600">Hours & quality</p>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-start gap-3 bg-white bg-opacity-60 backdrop-blur-sm p-3 rounded-lg border border-indigo-100">
-                      <div className="w-8 h-8 bg-indigo-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <span className="text-indigo-600 text-lg">📊</span>
-                      </div>
-                      <div>
-                        <p className="font-semibold text-gray-800 text-sm">30-Day Trends</p>
-                        <p className="text-xs text-gray-600">Visual insights</p>
-                      </div>
-                    </div>
+                  <div className="leading-tight">
+                    <div className="font-semibold text-gray-800">Log Daily</div>
+                    <div className="text-xs text-gray-500">Build better habits</div>
                   </div>
-                </div>
-
-                <div className="flex flex-col sm:flex-row lg:flex-col gap-3 lg:min-w-[180px]">
-                  <button 
-                    onClick={() => setShowLoginModal(true)} 
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl font-semibold shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 transition-all duration-200 transform hover:-translate-y-0.5"
-                  >
-                    Get Started →
-                  </button>
-                  <button 
-                    onClick={() => setShowVisualization(true)} 
-                    className="bg-white hover:bg-gray-50 border-2 border-gray-200 px-6 py-3 rounded-xl font-semibold text-gray-700 transition-all duration-200 hover:border-indigo-200"
-                  >
-                    Preview Demo
-                  </button>
                 </div>
               </div>
             </div>
-          </div>
-        ) : null}
 
-        {/* If logged in: show the tracker UI */}
+            <nav className="hidden md:flex items-center gap-4">
+              <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="text-sm text-gray-700 hover:text-gray-900">Home</button>
+              <button onClick={() => setShowVisualization(true)} className="text-sm text-gray-700 hover:text-gray-900">Insights</button>
+              <button onClick={() => window.scrollTo({ top: 9999, behavior: 'smooth' })} className="text-sm text-gray-700 hover:text-gray-900">Contact</button>
+              {!isLoggedIn ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => window.location.href = 'http://localhost:4000/auth/google'}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm hover:shadow-sm"
+                    aria-label="Sign in with Google"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                      <path d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.5h147.2c-6.4 34.6-25.5 64-54.3 83.7v69.7h87.7c51.2-47.2 81.9-116.5 81.9-198.5z" fill="#4285F4"/>
+                      <path d="M272 544.3c73.8 0 135.7-24.4 181-66.4l-87.7-69.7c-24.4 16.3-55.5 26-93.3 26-71.7 0-132.5-48.4-154.3-113.6H27.5v71.6C72.2 483 163.4 544.3 272 544.3z" fill="#34A853"/>
+                      <path d="M117.7 326.2c-10.3-30.8-10.3-64 0-94.8V159.8H27.5c-39.8 79.4-39.8 173.5 0 252.9l90.2-86.5z" fill="#FBBC05"/>
+                      <path d="M272 107.7c39 0 74 13.4 101.6 39.6l76.2-76.1C407.7 25.8 345.8 0 272 0 163.4 0 72.2 61.3 27.5 159.8l90.2 71.6C139.5 156.1 200.3 107.7 272 107.7z" fill="#EA4335"/>
+                    </svg>
+                    <span className="hidden lg:inline">Sign in</span>
+                  </button>
+
+                  <button onClick={() => setShowLoginModal(true)} className="ml-2 px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm">Get started</button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <div className="px-3 py-1 rounded-lg bg-white border border-gray-200 text-sm flex items-center gap-2">
+                    <User className="w-4 h-4" />
+                    <span className="truncate max-w-[8rem]">{userId}</span>
+                  </div>
+                  <button onClick={handleLogout} className="px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm flex items-center gap-2"><LogOut className="w-4 h-4" />Logout</button>
+                </div>
+              )}
+            </nav>
+
+            {/* mobile right-side */}
+            <div className="md:hidden">
+              <button onClick={() => setMobileMenuOpen(v => !v)} className="p-2 rounded-md hover:bg-gray-100">
+                <Menu className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* mobile menu */}
+        {mobileMenuOpen && (
+          <div className="md:hidden border-t border-gray-100 bg-white/90">
+            <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col gap-2">
+              <button onClick={() => { window.scrollTo({ top: 0, behavior: 'smooth' }); setMobileMenuOpen(false); }} className="text-left">Home</button>
+              <button onClick={() => { setShowVisualization(true); setMobileMenuOpen(false); }} className="text-left">Insights</button>
+              {!isLoggedIn ? (
+                <>
+                  <button onClick={() => { window.location.href = 'http://localhost:4000/auth/google'; }} className="text-left">Sign in with Google</button>
+                  <button onClick={() => { setShowLoginModal(true); setMobileMenuOpen(false); }} className="text-left">Get started</button>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <div className="text-left">{userId}</div>
+                    <button onClick={() => { handleLogout(); setMobileMenuOpen(false); }} className="text-sm text-red-500">Logout</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </header>
+
+      {/* MAIN with bottom padding so sticky footer doesn't overlap */}
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 pb-28">
+        {/* Landing / Hero (for not logged in) */}
+        {!isLoggedIn && (
+          <section className="mt-6 bg-gradient-to-br from-indigo-50 via-white to-purple-50 rounded-2xl shadow-lg p-6 sm:p-10 border border-indigo-100 mb-6 overflow-hidden relative">
+            <div className="absolute -top-16 -right-16 w-72 h-72 rounded-full bg-indigo-100 opacity-20 blur-3xl"></div>
+            <div className="grid md:grid-cols-2 gap-6 items-center">
+              <div>
+                <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-3">Build small habits that add up.</h1>
+                <p className="text-gray-600 mb-6">Track daily activities, log sleep, and visualize 30-day trends. Start quickly with a username — or sign in with Google to sync across devices.</p>
+
+                <div className="flex gap-3 flex-wrap">
+                  <button onClick={() => setShowLoginModal(true)} className="bg-indigo-600 text-white px-5 py-3 rounded-lg shadow hover:bg-indigo-700">Get started</button>
+                  <button onClick={() => window.location.href = 'http://localhost:4000/auth/google'} className="flex items-center gap-3 px-5 py-3 rounded-lg border border-gray-200 bg-white hover:shadow">
+                    <svg className="w-5 h-5" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                      <path d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.5h147.2c-6.4 34.6-25.5 64-54.3 83.7v69.7h87.7c51.2-47.2 81.9-116.5 81.9-198.5z" fill="#4285F4"/>
+                      <path d="M272 544.3c73.8 0 135.7-24.4 181-66.4l-87.7-69.7c-24.4 16.3-55.5 26-93.3 26-71.7 0-132.5-48.4-154.3-113.6H27.5v71.6C72.2 483 163.4 544.3 272 544.3z" fill="#34A853"/>
+                      <path d="M117.7 326.2c-10.3-30.8-10.3-64 0-94.8V159.8H27.5c-39.8 79.4-39.8 173.5 0 252.9l90.2-86.5z" fill="#FBBC05"/>
+                      <path d="M272 107.7c39 0 74 13.4 101.6 39.6l76.2-76.1C407.7 25.8 345.8 0 272 0 163.4 0 72.2 61.3 27.5 159.8l90.2 71.6C139.5 156.1 200.3 107.7 272 107.7z" fill="#EA4335"/>
+                    </svg>
+                    <span>Sign in with Google</span>
+                  </button>
+                </div>
+
+                <ul className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-gray-600">
+                  <li>• Private-by-default — local storage for quick start</li>
+                  <li>• Option to use Google sign-in to sync data</li>
+                </ul>
+              </div>
+
+              <div>
+                {/* small feature cards */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-4 rounded-lg bg-white shadow-sm border border-gray-100">
+                    <p className="text-sm text-gray-700 font-semibold">Daily Habit Tracking</p>
+                    <p className="text-xs text-gray-500 mt-1">Mark days and build streaks</p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-white shadow-sm border border-gray-100">
+                    <p className="text-sm text-gray-700 font-semibold">Sleep Logging</p>
+                    <p className="text-xs text-gray-500 mt-1">Hours & quality</p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-white shadow-sm border border-gray-100">
+                    <p className="text-sm text-gray-700 font-semibold">30-Day Insights</p>
+                    <p className="text-xs text-gray-500 mt-1">Visualize trends</p>
+                  </div>
+                  <div className="p-4 rounded-lg bg-white shadow-sm border border-gray-100">
+                    <p className="text-sm text-gray-700 font-semibold">Future-proof</p>
+                    <p className="text-xs text-gray-500 mt-1">Easy to connect Supabase / MongoDB</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Tracker UI */}
         {isLoggedIn && (
           <>
-            {/* Header controls (desktop/mobile adjusted) */}
+            {/* Header controls */}
             <div className="mb-4">
               <div className={`flex ${isMobile ? 'flex-col gap-3' : 'flex-row items-center justify-between'} mb-2`}>
                 <div>
@@ -498,7 +657,7 @@ export default function HabitTracker() {
               </div>
             </div>
 
-            {/* Visualization Section */}
+            {/* Visualizations */}
             {showVisualization && (
               <div className="mb-6 space-y-4">
                 <div className="bg-white rounded-xl shadow-lg p-3 sm:p-6 border border-gray-100">
@@ -515,7 +674,7 @@ export default function HabitTracker() {
                   </ResponsiveContainer>
                 </div>
 
-                {sleepData.length > 0 && (
+                {prepareSleepData().length > 0 && (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <div className="bg-white rounded-xl shadow-lg p-3 sm:p-6 border border-gray-100">
                       <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-3">Sleep Hours Trend</h3>
@@ -572,7 +731,7 @@ export default function HabitTracker() {
                         <YAxis tick={{ fontSize: 10 }} />
                         <Tooltip />
                         <Legend wrapperStyle={{ fontSize: '12px' }} />
-                        {habits.slice(0, 3).map((habit) => (
+                        {habitsDefs.slice(0, 3).map((habit) => (
                           <Bar key={habit.id} dataKey={habit.name} fill={habit.color} />
                         ))}
                       </BarChart>
@@ -582,7 +741,7 @@ export default function HabitTracker() {
               </div>
             )}
 
-            {/* Stats & Sleep & Habits (same UI as before) */}
+            {/* Stats & Sleep & Habits */}
             <div className={`grid ${isMobile ? 'grid-cols-2 gap-3' : 'grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6'} mb-6`}>
               <div className="bg-white rounded-xl shadow-sm p-3 sm:p-6 border border-gray-100">
                 <div className="flex items-center justify-between">
@@ -600,7 +759,7 @@ export default function HabitTracker() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-gray-500 text-xs sm:text-sm mb-1">Streaks</p>
-                    <p className="text-lg sm:text-3xl font-bold text-purple-600">{totalStreak}</p>
+                    <p className="text-lg sm:text-3xl font-bold text-purple-600">{totalStreak()}</p>
                   </div>
                   <div className="bg-purple-100 p-2 rounded-lg">
                     <Award className="w-5 h-5 text-purple-600" />
@@ -612,7 +771,7 @@ export default function HabitTracker() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-gray-500 text-xs sm:text-sm mb-1">Habits</p>
-                    <p className="text-lg sm:text-3xl font-bold text-green-600">{habits.length}</p>
+                    <p className="text-lg sm:text-3xl font-bold text-green-600">{habitsDefs.length}</p>
                   </div>
                   <div className="bg-green-100 p-2 rounded-lg">
                     <Calendar className="w-5 h-5 text-green-600" />
@@ -633,6 +792,7 @@ export default function HabitTracker() {
               </div>
             </div>
 
+            {/* Sleep Tracking */}
             <div className="bg-white rounded-xl shadow-sm p-3 sm:p-6 border border-gray-100 mb-4">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
@@ -645,7 +805,7 @@ export default function HabitTracker() {
                 </button>
               </div>
 
-              {getTodaySleep() ? (
+              {getTodaySleep() && getTodaySleep().hours != null ? (
                 <div className="bg-blue-50 rounded-lg p-3">
                   <p className="text-sm text-gray-700">
                     <span className="font-semibold">Today:</span> {getTodaySleep().hours} hours
@@ -718,32 +878,44 @@ export default function HabitTracker() {
                 </div>
               )}
 
-              {habits.length === 0 ? (
+              {habitsDefs.length === 0 ? (
                 <div className="text-center py-8 text-gray-400">
                   <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
                   <p className="text-sm">No habits yet. Add your first habit to get started!</p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {habits.map(habit => (
+                  {habitsDefs.map(habit => (
                     <div key={habit.id} className="border border-gray-200 rounded-lg p-3 hover:shadow-md transition">
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-3 flex-1 min-w-0">
                           <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: habit.color }} />
                           <h3 className="font-semibold text-gray-800 truncate">{habit.name}</h3>
-                          <span className="text-sm text-gray-500 whitespace-nowrap">{habit.streak}🔥</span>
+                          <span className="text-sm text-gray-500 whitespace-nowrap">{calculateStreakFromEntries(habit.id)}🔥</span>
                         </div>
-                        <button onClick={() => deleteHabit(habit.id)} className="text-gray-400 hover:text-red-500 ml-2"><X className="w-5 h-5" /></button>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => deleteHabit(habit.id)} className="text-gray-400 hover:text-red-500 ml-2"><X className="w-5 h-5" /></button>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-7 gap-1">
                         {getLast7Days().map((date, idx) => {
                           const dateString = getDateString(date);
-                          const isCompleted = habit.completed.includes(dateString);
+                          // find entry for that date
+                          const entry = entries.find(e => e.date === dateString) || (dateString === todayEntry.date ? todayEntry : null);
+                          const isCompleted = entry ? (entry.completedHabits || []).includes(habit.id) : false;
                           const isToday = dateString === getTodayString();
 
                           return (
-                            <button key={idx} onClick={() => isToday && toggleHabit(habit.id)} disabled={!isToday} className={`py-3 rounded-lg border-2 transition text-center ${isCompleted ? 'border-transparent' : 'border-gray-200 bg-white'} ${isToday ? 'cursor-pointer hover:scale-105' : 'cursor-default opacity-60'}`} style={{ backgroundColor: isCompleted ? habit.color : undefined, color: isCompleted ? 'white' : undefined }} aria-pressed={isCompleted}>
+                            <button
+                              key={idx}
+                              onClick={() => isToday && toggleHabit(habit.id)}
+                              disabled={!isToday}
+                              className={`py-3 rounded-lg border-2 transition text-center ${isCompleted ? '' : 'bg-white'} ${isToday ? 'cursor-pointer hover:scale-105' : 'cursor-default opacity-60'}`}
+                              style={{ backgroundColor: isCompleted ? habit.color : undefined, color: isCompleted ? 'white' : undefined }}
+                              aria-pressed={isCompleted}
+                              title={isToday ? 'Toggle for today' : 'Locked (past day)'}
+                            >
                               <div className="text-xs font-medium">{date.toLocaleDateString('en-US', { weekday: 'short' })[0]}</div>
                               {isCompleted && <Check className="w-4 h-4 mx-auto mt-1" />}
                             </button>
@@ -757,11 +929,64 @@ export default function HabitTracker() {
             </div>
           </>
         )}
-      
-      </div>
-      
-      
+      </main>
+
+      {/* Sticky Footer */}
+      <footer className="fixed bottom-0 left-0 w-full bg-white border-t border-gray-100 z-50">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold"> <img src="1.svg" alt="" /> </div>
+            <div>
+              <div className="text-sm font-medium text-gray-800">Log Daily</div>
+              <div className="text-xs text-gray-500">Small steps. Big change.</div>
+            </div>
+          </div>
+
+          <div className="text-sm text-gray-600 flex items-center gap-4">
+            <a href="#" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="hover:text-gray-800">Home</a>
+            <a href="#" onClick={(e) => { e.preventDefault(); setShowVisualization(true); }} className="hover:text-gray-800">Insights</a>
+            <a href="#" onClick={(e) => { e.preventDefault(); setShowLoginModal(true); }} className="hover:text-gray-800">Sign in</a>
+          </div>
+
+          <div className="text-xs text-gray-400">© {new Date().getFullYear()} Log Daily • Built with ♥</div>
+        </div>
+      </footer>
+
+      {/* LOGIN MODAL — Google-themed & username fallback */}
+      {showLoginModal && (
+        <div className="fixed inset-0 bg-black/20 flex items-center justify-center z-60 p-4">
+          <div className="bg-white rounded-2xl p-5 max-w-md w-full shadow-xl ring-1 ring-black/5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Welcome</h3>
+              <button onClick={() => setShowLoginModal(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+
+            <p className="text-sm text-gray-600 mb-4">Start quickly with a username — or sign in with Google to sync your progress across devices.</p>
+
+            <div className="space-y-3 mb-3">
+              <input type="text" placeholder="username or email" value={userId} onChange={(e) => setUserId(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" onKeyDown={(e) => e.key === 'Enter' && handleLoginModalConfirm(userId)} />
+
+              <div className="flex gap-2">
+                <button onClick={() => handleLoginModalConfirm(userId)} className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded-lg">Continue</button>
+                <a href="http://localhost:4000/auth/google" className="flex-1 inline-flex items-center justify-center gap-3 px-4 py-2 rounded-lg border border-gray-200 bg-white hover:shadow">
+                  <svg className="w-5 h-5" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.5h147.2c-6.4 34.6-25.5 64-54.3 83.7v69.7h87.7c51.2-47.2 81.9-116.5 81.9-198.5z" fill="#4285F4"/>
+                    <path d="M272 544.3c73.8 0 135.7-24.4 181-66.4l-87.7-69.7c-24.4 16.3-55.5 26-93.3 26-71.7 0-132.5-48.4-154.3-113.6H27.5v71.6C72.2 483 163.4 544.3 272 544.3z" fill="#34A853"/>
+                    <path d="M117.7 326.2c-10.3-30.8-10.3-64 0-94.8V159.8H27.5c-39.8 79.4-39.8 173.5 0 252.9l90.2-86.5z" fill="#FBBC05"/>
+                    <path d="M272 107.7c39 0 74 13.4 101.6 39.6l76.2-76.1C407.7 25.8 345.8 0 272 0 163.4 0 72.2 61.3 27.5 159.8l90.2 71.6C139.5 156.1 200.3 107.7 272 107.7z" fill="#EA4335"/>
+                  </svg>
+                  <span>Sign in with Google</span>
+                </a>
+              </div>
+
+              <div className="text-xs text-gray-500 mt-2">
+                <strong className="text-gray-700">Why sign in with Google?</strong>
+                <p className="mt-1">Sync your habits across devices and enjoy secure authentication without a password.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-    
   );
 }

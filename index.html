@@ -1,13 +1,110 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
+    <meta charset="utf-8" />
+    <meta http-equiv="x-ua-compatible" content="ie=edge" />
+
+    <!-- Basic required -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Log-Daily — Simple habit & sleep tracker (privacy-first)</title>
+    <meta name="description" content="Log-Daily — a minimal habit & sleep tracker. Build streaks, log sleep, view 30-day trends. Start locally or sign in with Google to sync across devices." />
+    <meta name="keywords" content="habit tracker, sleep tracker, streaks, productivity, daily habits, health, log daily" />
+    <meta name="author" content="Himanshu Kumar Jha" />
+    <link rel="canonical" href="https://yourdomain.com/" />
+
+    <!-- Robots -->
+    <meta name="robots" content="index, follow" />
+    <!-- If staging: -->
+    <!-- <meta name="robots" content="noindex, nofollow" /> -->
+
+    <!-- Mobile & PWA -->
+    <meta name="theme-color" content="#4f46e5" />
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Favicons (replace /favicon-*.png or add your favicons) -->
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>habit-tracker</title>
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+
+    <!-- Open Graph (Facebook, LinkedIn) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Log-Daily — Simple habit & sleep tracker" />
+    <meta property="og:description" content="Track daily habits, log sleep and visualise 30-day trends. Privacy-first with optional Google sign-in to sync across devices." />
+    <meta property="og:url" content="https://yourdomain.com/" />
+    <meta property="og:site_name" content="Log-Daily" />
+    <meta property="og:image" content="https://yourdomain.com/social-preview.png" />
+    <meta property="og:image:alt" content="Log-Daily: habit tracker dashboard preview" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@your_twitter_handle" />
+    <meta name="twitter:title" content="Log-Daily — Simple habit & sleep tracker" />
+    <meta name="twitter:description" content="Track daily habits, log sleep and visualise 30-day trends. Privacy-first with optional Google sign-in to sync across devices." />
+    <meta name="twitter:image" content="https://logdaily.netlify.app/1.svg" />
+
+    <!-- Structured data (JSON-LD) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "url": "https://logdaily.netlify.app/",
+      "name": "Log-Daily",
+      "description": "A minimal habit & sleep tracker with optional Google sign-in to sync across devices.",
+      "publisher": {
+        "@type": "Organization",
+        "name": "Log-Daily",
+        "logo": {
+          "@type": "ImageObject",
+          "url": "https://logdaily.netlify.app/1.svg"
+        }
+      }
+    }
+    </script>
+
+    <!-- Preconnect / Preload fonts & analytics -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Example font; replace or remove if not using Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+
+    <!-- Performance hints -->
+    <link rel="preload" href="/src/main.jsx" as="script" />
+    <!-- Optional: sitemap (add /sitemap.xml to your server) -->
+    <link rel="sitemap" type="application/xml" title="Sitemap" href="/sitemap.xml" />
+
+    <!-- Social image: generate a 1200x630 PNG for best results -->
+    <!-- Replace the sample URLs with your real ones before deploying. -->
+
+    <!-- Styles (critical CSS inline optionally) -->
+    <style>
+      /* Minimal critical CSS so crawlers see some content before JS hydration.
+         Keep this tiny — move full css to your compiled bundle. */
+      html,body,#root{height:100%}
+      body{font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin:0; background:#fff; color:#111}
+      .visually-hidden{position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden}
+    </style>
   </head>
+
   <body>
+    <!-- Minimal visible content for crawlers & accessibility -->
+    <header class="visually-hidden" aria-hidden="false">
+      <h1>Log-Daily — Habit & Sleep Tracker</h1>
+      <p>Privacy-first habit and sleep tracker. Start locally or sign in with Google to sync your progress across devices.</p>
+    </header>
+
+    <!-- App root -->
     <div id="root"></div>
+
+    <!-- Noscript fallback (important for SEO & accessibility) -->
+    <noscript>
+      <div style="padding:1rem;max-width:900px;margin:1rem auto;background:#fff8e1;border:1px solid #f1e0a3;border-left:4px solid #f59e0b">
+        <strong>JavaScript is required to use Log-Daily.</strong>
+        <p>If you cannot run JavaScript, read our <a href="/about">about page</a> for features and privacy details.</p>
+      </div>
+    </noscript>
+
+    <!-- Your client script -->
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
