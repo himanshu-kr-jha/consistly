@@ -517,7 +517,7 @@ export default function HabitTracker() {
               {!isLoggedIn ? (
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => window.location.href = 'http://localhost:4000/auth/google'}
+                    onClick={() => window.location.href = 'https://api-logdaily-com.onrender.com/auth/google'}
                     className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm hover:shadow-sm"
                     aria-label="Sign in with Google"
                   >
@@ -560,7 +560,7 @@ export default function HabitTracker() {
               <button onClick={() => { setShowVisualization(true); setMobileMenuOpen(false); }} className="text-left">Insights</button>
               {!isLoggedIn ? (
                 <>
-                  <button onClick={() => { window.location.href = 'http://localhost:4000/auth/google'; }} className="text-left">Sign in with Google</button>
+                  <button onClick={() => { window.location.href = 'https://api-logdaily-com.onrender.com/auth/google'; }} className="text-left">Sign in with Google</button>
                   <button onClick={() => { setShowLoginModal(true); setMobileMenuOpen(false); }} className="text-left">Get started</button>
                 </>
               ) : (
@@ -589,7 +589,7 @@ export default function HabitTracker() {
 
                 <div className="flex gap-3 flex-wrap">
                   <button onClick={() => setShowLoginModal(true)} className="bg-indigo-600 text-white px-5 py-3 rounded-lg shadow hover:bg-indigo-700">Get started</button>
-                  <button onClick={() => window.location.href = 'http://localhost:4000/auth/google'} className="flex items-center gap-3 px-5 py-3 rounded-lg border border-gray-200 bg-white hover:shadow">
+                  <button onClick={() => window.location.href = 'https://api-logdaily-com.onrender.com/auth/google'} className="flex items-center gap-3 px-5 py-3 rounded-lg border border-gray-200 bg-white hover:shadow">
                     <svg className="w-5 h-5" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                       <path d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.5h147.2c-6.4 34.6-25.5 64-54.3 83.7v69.7h87.7c51.2-47.2 81.9-116.5 81.9-198.5z" fill="#4285F4"/>
                       <path d="M272 544.3c73.8 0 135.7-24.4 181-66.4l-87.7-69.7c-24.4 16.3-55.5 26-93.3 26-71.7 0-132.5-48.4-154.3-113.6H27.5v71.6C72.2 483 163.4 544.3 272 544.3z" fill="#34A853"/>
@@ -968,7 +968,7 @@ export default function HabitTracker() {
 
               <div className="flex gap-2">
                 <button onClick={() => handleLoginModalConfirm(userId)} className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded-lg">Continue</button>
-                <a href="http://localhost:4000/auth/google" className="flex-1 inline-flex items-center justify-center gap-3 px-4 py-2 rounded-lg border border-gray-200 bg-white hover:shadow">
+                <a href="https://api-logdaily-com.onrender.com/auth/google" className="flex-1 inline-flex items-center justify-center gap-3 px-4 py-2 rounded-lg border border-gray-200 bg-white hover:shadow">
                   <svg className="w-5 h-5" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <path d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.5h147.2c-6.4 34.6-25.5 64-54.3 83.7v69.7h87.7c51.2-47.2 81.9-116.5 81.9-198.5z" fill="#4285F4"/>
                     <path d="M272 544.3c73.8 0 135.7-24.4 181-66.4l-87.7-69.7c-24.4 16.3-55.5 26-93.3 26-71.7 0-132.5-48.4-154.3-113.6H27.5v71.6C72.2 483 163.4 544.3 272 544.3z" fill="#34A853"/>
