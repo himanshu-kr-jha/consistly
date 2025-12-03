@@ -1,5 +1,5 @@
 // src/api.js
-const API_ORIGIN = 'https://api-logdaily-com.onrender.com/';
+const API_ORIGIN = 'https://api-logdaily-com.onrender.com';
 const TOKEN_KEY = 'habit_tracker_token';
 
 export function setAuthToken(token) {
