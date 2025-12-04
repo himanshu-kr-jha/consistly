@@ -1067,7 +1067,7 @@ export default function HabitTracker() {
               {!isLoggedIn ? (
                 <div className="flex items-center gap-2 ml-2">
                   <button
-                    onClick={() => window.location.href = `${BACKEND_URL}/auth/google`}
+                    onClick={() => window.location.href = `https://${BACKEND_URL}/auth/google`}
                     className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium hover:shadow-md hover:border-gray-300 transition-all duration-200"
                   >
                     <svg className="w-4 h-4" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg">
@@ -1123,7 +1123,7 @@ export default function HabitTracker() {
               </button>
               {!isLoggedIn ? (
                 <>
-                  <button onClick={() => { window.location.href = `${BACKEND_URL}/auth/google`; }} className="text-left px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors">
+                  <button onClick={() => { window.location.href = `https://${BACKEND_URL}/auth/google`; }} className="text-left px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors">
                     Sign in with Google
                   </button>
                   <button onClick={() => { setShowLoginModal(true); setMobileMenuOpen(false); }} className="text-left px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold">
@@ -1178,7 +1178,7 @@ export default function HabitTracker() {
                   </button>
 
                   <button
-                    onClick={() => window.location.href = `http://${BACKEND_URL}/auth/google`}
+                    onClick={() => window.location.href = `https://${BACKEND_URL}/auth/google`}
                     className="flex items-center gap-3 px-8 py-4 rounded-xl border-2 border-gray-200 bg-white hover:border-gray-300 hover:shadow-lg transition-all duration-200 font-semibold"
                   >
                     <svg className="w-5 h-5" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg">
