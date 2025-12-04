@@ -40,6 +40,7 @@ if (typeof window !== 'undefined' && !window.storage) {
 ----------------------------*/
 export default function HabitTracker() {
   const [userId, setUserId] = useState('');
+  const [username, setUserName] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [habitsDefs, setHabitsDefs] = useState([]);
   const [entries, setEntries] = useState([]);
@@ -85,7 +86,8 @@ export default function HabitTracker() {
             setHabitsDefs(data.habits || []);
             setEntries(data.entries || []);
             setTodayEntry(data.todayEntry || { date: getTodayString(), completedHabits: [], sleep: { hours: null, quality: null } });
-            setUserId(data.userInfo?.email || data.userInfo?.name || '');
+            setUserId(data.userInfo?.email || '');
+            setUserName(data.userInfo?.name || '');
           } catch (err) {
             console.error('Failed to load user data after token capture', err);
             setAuthToken(null);
@@ -109,7 +111,9 @@ export default function HabitTracker() {
           setHabitsDefs(data.habits || []);
           setEntries(data.entries || []);
           setTodayEntry(data.todayEntry || { date: getTodayString(), completedHabits: [], sleep: { hours: null, quality: null } });
-          setUserId(data.userInfo?.email || data.userInfo?.name || '');
+          setUserId(data.userInfo?.email || '');
+          setUserName(data.userInfo?.name || '');
+
         } catch (err) {
           console.error('Failed to fetch user data', err);
           setAuthToken(null);
@@ -202,6 +206,7 @@ export default function HabitTracker() {
     setAuthToken(null);
     setIsLoggedIn(false);
     setUserId('');
+    setUserName('');
     setHabitsDefs([]);
     setEntries([]);
     setTodayEntry({ date: getTodayString(), completedHabits: [], sleep: { hours: null, quality: null } });
@@ -438,8 +443,8 @@ export default function HabitTracker() {
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-3 group cursor-pointer">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center shadow-lg group-hover:shadow-xl transition-all duration-300 group-hover:scale-105">
-                  <img src="/1.svg" alt="Log Daily" className="w-6 h-6" />
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center group-hover:shadow-xl transition-all duration-300 group-hover:scale-105">
+                  <img src="/logo.png" alt="Log Daily" className="w-10 h-10" />
                 </div>
                 <div className="leading-tight">
                   <div className="font-bold text-gray-800 text-lg">Log Daily</div>
@@ -619,7 +624,7 @@ export default function HabitTracker() {
               <div className={`flex ${isMobile ? 'flex-col gap-4' : 'flex-row items-center justify-between'} mb-4`}>
                 <div>
                   <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-1">
-                    Welcome back, <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">{userId}</span>
+                    Welcome back, <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">{username || userId}</span>
                   </h2>
                   <p className="text-sm text-gray-600">Keep building those amazing habits! 🎯</p>
                 </div>
@@ -780,7 +785,7 @@ export default function HabitTracker() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-gray-500 text-xs sm:text-sm mb-2 font-medium">{stat.label}</p>
-                      <p className="text-2xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r ${stat.color}">{stat.value}</p>
+                      <p className={`text-2xl sm:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r ${stat.color}`}>{stat.value}</p>
                     </div>
                     <div className={`${stat.bg} p-3 rounded-xl group-hover:scale-110 transition-transform duration-300`}>
                       <stat.icon className={`w-6 h-6 text-transparent bg-clip-text bg-gradient-to-r ${stat.color}`} style={{ stroke: stat.color.includes('indigo') ? '#6366f1' : stat.color.includes('purple') ? '#a855f7' : stat.color.includes('green') ? '#10b981' : '#3b82f6', strokeWidth: 2 }} />
@@ -950,8 +955,8 @@ export default function HabitTracker() {
       <footer className="fixed bottom-0 left-0 w-full bg-white/90 backdrop-blur-md border-t border-gray-100 z-50 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center shadow-lg">
-              <img src="/1.svg" alt="Log Daily" className="w-6 h-6" />
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center ">
+              <img src="/logo.png" alt="Log Daily" className="w-10 h-10" />
             </div>
             <div>
               <div className="text-sm font-bold text-gray-800">Log Daily</div>
