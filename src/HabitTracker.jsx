@@ -71,6 +71,9 @@ export default function HabitTracker() {
   const [actionToastVisible, setActionToastVisible] = useState(false);
   const [actionToastMessage, setActionToastMessage] = useState('');
   const [actionToastType, setActionToastType] = useState('success'); // could be 'success' or 'error'
+  // for auto-dismiss + fade animation
+  const [toastFading, setToastFading] = useState(false);
+  const toastHideTimers = React.useRef({ fadeTimer: null, hideTimer: null });
 
   const colors = ['#6366f1', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#f97316'];
 
@@ -131,6 +134,48 @@ export default function HabitTracker() {
       })();
     }
   }, []);
+
+
+  useEffect(() => {
+    if (!showToast) {
+      // if toast closed manually, ensure timers cleared & fade flag reset
+      setToastFading(false);
+      if (toastHideTimers.current.fadeTimer) {
+        clearTimeout(toastHideTimers.current.fadeTimer);
+        toastHideTimers.current.fadeTimer = null;
+      }
+      if (toastHideTimers.current.hideTimer) {
+        clearTimeout(toastHideTimers.current.hideTimer);
+        toastHideTimers.current.hideTimer = null;
+      }
+      return;
+    }
+
+    // Start fade just before hiding so user sees a fade animation
+    // Visible for ~3s total: start fade at 2600ms, hide at 3000ms
+    toastHideTimers.current.fadeTimer = setTimeout(() => {
+      setToastFading(true);
+      toastHideTimers.current.fadeTimer = null;
+    }, 2600);
+
+    toastHideTimers.current.hideTimer = setTimeout(() => {
+      setShowToast(false);
+      toastHideTimers.current.hideTimer = null;
+      setToastFading(false);
+    }, 3000);
+
+    return () => {
+      if (toastHideTimers.current.fadeTimer) {
+        clearTimeout(toastHideTimers.current.fadeTimer);
+        toastHideTimers.current.fadeTimer = null;
+      }
+      if (toastHideTimers.current.hideTimer) {
+        clearTimeout(toastHideTimers.current.hideTimer);
+        toastHideTimers.current.hideTimer = null;
+      }
+    };
+  }, [showToast]);
+
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 640);
@@ -475,8 +520,17 @@ export default function HabitTracker() {
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50">
       {/* Dismissible Toast for Free Tier Notice - ADD THIS SECTION */}
       {showToast && (
-        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-[100] w-full max-w-md px-4 animate-in slide-in-from-top duration-500">
-          <div className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-2xl shadow-2xl p-4 flex items-start gap-3 border border-blue-400/50">
+        <div
+          className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-[100] w-full max-w-md px-4 transition-all duration-500`}
+          // add accessible role
+          role="status"
+          aria-live="polite"
+        >
+          <div
+            className={`bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-2xl shadow-2xl p-4 flex items-start gap-3 border border-blue-400/50
+        ${toastFading ? 'opacity-0 -translate-y-4' : 'opacity-100 translate-y-0'}
+        transition-all duration-500`}
+          >
             <div className="flex-shrink-0 mt-0.5">
               <Info className="w-7 h-7" />
             </div>
@@ -487,7 +541,19 @@ export default function HabitTracker() {
               </p>
             </div>
             <button
-              onClick={() => setShowToast(false)}
+              onClick={() => {
+                // clear timers and dismiss immediately
+                if (toastHideTimers.current.fadeTimer) {
+                  clearTimeout(toastHideTimers.current.fadeTimer);
+                  toastHideTimers.current.fadeTimer = null;
+                }
+                if (toastHideTimers.current.hideTimer) {
+                  clearTimeout(toastHideTimers.current.hideTimer);
+                  toastHideTimers.current.hideTimer = null;
+                }
+                setToastFading(false);
+                setShowToast(false);
+              }}
               className="flex-shrink-0 text-white/80 hover:text-white hover:bg-white/10 rounded-lg p-1 transition-all duration-200"
               aria-label="Dismiss notification"
             >
@@ -496,6 +562,7 @@ export default function HabitTracker() {
           </div>
         </div>
       )}
+
       {/* Action toast (save success / error) */}
       {actionToastVisible && (
         <div className="fixed right-4 bottom-6 z-[110] w-auto max-w-sm px-4 animate-in slide-in-from-bottom duration-300">
@@ -1099,8 +1166,8 @@ export default function HabitTracker() {
                     key={rating}
                     onClick={() => setSleepQuality(rating)}
                     className={`py-4 rounded-xl border-2 transition-all duration-200 font-bold text-lg hover:scale-105 ${sleepQuality === rating
-                        ? 'border-blue-600 bg-gradient-to-br from-blue-500 to-cyan-500 text-white shadow-lg scale-105'
-                        : 'border-gray-200 hover:border-blue-300 bg-white text-gray-600'
+                      ? 'border-blue-600 bg-gradient-to-br from-blue-500 to-cyan-500 text-white shadow-lg scale-105'
+                      : 'border-gray-200 hover:border-blue-300 bg-white text-gray-600'
                       }`}
                   >
                     {rating}
