@@ -1,3 +1,4 @@
+// HabitTracker.jsx (updated)
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Calendar, TrendingUp, Award, Plus, X, Check, Moon,
@@ -8,14 +9,9 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 import { setAuthToken, getAuthToken, authFetch } from './api';
-// State
-
 
 // Toast JSX (place at the top of your return/render)
-
-/* ---------------------------
-  localStorage polyfill for window.storage
----------------------------- */
+// localStorage polyfill (unchanged)
 if (typeof window !== 'undefined' && !window.storage) {
   window.storage = {
     async get(key) {
@@ -39,18 +35,17 @@ if (typeof window !== 'undefined' && !window.storage) {
   };
 }
 
-/* ---------------------------
-  HABIT TRACKER COMPONENT
-  - Optimistic UI + local queue + periodic flush
-  - Sends diffs for single-entry updates
-----------------------------*/
 export default function HabitTracker() {
-  const SYNC_QUEUE_KEY = 'ld_sync_queue_v1'; // localStorage key for queued diffs
-  const SYNC_INTERVAL_MS = 15000; // flush every 15s
+  // IMPORTANT: Include protocol so redirects like /auth/google work correctly
+  // const BACKEND_URL = 'http://localhost:4000'; // <-- changed (was 'localhost:4000')
+  const BACKEND_URL = 'https://api-logdaily-com.onrender.com'; // <-- changed (was 'logdaily.com/api')
+  const SYNC_QUEUE_KEY = 'ld_sync_queue_v1';
+  const SYNC_INTERVAL_MS = 15000;
 
   const [userId, setUserId] = useState('');
   const [username, setUserName] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  // habitsDefs expects local shape { id: habitId, name, color, createdAt, days? }
   const [habitsDefs, setHabitsDefs] = useState([]);
   const [entries, setEntries] = useState([]);
   const [todayEntry, setTodayEntry] = useState({
@@ -59,7 +54,7 @@ export default function HabitTracker() {
     sleep: { hours: null, quality: null }
   });
 
-  // UI State
+  // UI State unchanged
   const [showAddHabit, setShowAddHabit] = useState(false);
   const [newHabitName, setNewHabitName] = useState('');
   const [selectedColor, setSelectedColor] = useState('#6366f1');
@@ -72,26 +67,18 @@ export default function HabitTracker() {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showToast, setShowToast] = useState(true);
-  // Action toast for saves (distinct from the free-tier toast)
   const [actionToastVisible, setActionToastVisible] = useState(false);
   const [actionToastMessage, setActionToastMessage] = useState('');
-  const [actionToastType, setActionToastType] = useState('success'); // could be 'success' or 'error'
-  // for auto-dismiss + fade animation
+  const [actionToastType, setActionToastType] = useState('success');
   const [toastFading, setToastFading] = useState(false);
   const toastHideTimers = React.useRef({ fadeTimer: null, hideTimer: null });
 
   const colors = ['#6366f1', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#f97316'];
 
-  // avoid auto-saving immediately after load
   const initialLoadRef = useRef(true);
-  // debounce timer for saving habitsDefs
   const habitsSaveTimer = useRef(null);
-
-  // queue in memory mirror of localStorage queue
   const queueRef = useRef([]);
-  // lock to prevent concurrent flush
   const flushingRef = useRef(false);
-  // interval id
   const syncIntervalRef = useRef(null);
 
   /* ---------------------------
@@ -111,12 +98,8 @@ export default function HabitTracker() {
         setIsLoggedIn(true);
         (async () => {
           try {
-            const data = await authFetch('/api/user/data', { method: 'GET' });
-            setHabitsDefs(data.habits || []);
-            setEntries(data.entries || []);
-            setTodayEntry(data.todayEntry || { date: getTodayString(), completedHabits: [], sleep: { hours: null, quality: null } });
-            setUserId(data.userInfo?.email || '');
-            setUserName(data.userInfo?.name || '');
+            // Load habits (from Habit collection) and entries separately
+            await loadUserData(); // will call both endpoints
           } catch (err) {
             console.error('Failed to load user data after token capture', err);
             setAuthToken(null);
@@ -136,13 +119,7 @@ export default function HabitTracker() {
       setIsLoggedIn(true);
       (async () => {
         try {
-          const data = await authFetch('/api/user/data', { method: 'GET' });
-          setHabitsDefs(data.habits || []);
-          setEntries(data.entries || []);
-          setTodayEntry(data.todayEntry || { date: getTodayString(), completedHabits: [], sleep: { hours: null, quality: null } });
-          setUserId(data.userInfo?.email || '');
-          setUserName(data.userInfo?.name || '');
-
+          await loadUserData();
         } catch (err) {
           console.error('Failed to fetch user data', err);
           setAuthToken(null);
@@ -156,10 +133,8 @@ export default function HabitTracker() {
     }
   }, []);
 
-
   useEffect(() => {
     if (!showToast) {
-      // if toast closed manually, ensure timers cleared & fade flag reset
       setToastFading(false);
       if (toastHideTimers.current.fadeTimer) {
         clearTimeout(toastHideTimers.current.fadeTimer);
@@ -172,8 +147,6 @@ export default function HabitTracker() {
       return;
     }
 
-    // Start fade just before hiding so user sees a fade animation
-    // Visible for ~3s total: start fade at 2600ms, hide at 3000ms
     toastHideTimers.current.fadeTimer = setTimeout(() => {
       setToastFading(true);
       toastHideTimers.current.fadeTimer = null;
@@ -197,7 +170,6 @@ export default function HabitTracker() {
     };
   }, [showToast]);
 
-
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 640);
     window.addEventListener('resize', onResize);
@@ -205,27 +177,31 @@ export default function HabitTracker() {
   }, []);
 
   useEffect(() => {
-    if (isLoggedIn && userId) loadUserData();
-  }, [isLoggedIn, userId]);
+    if (isLoggedIn) loadUserData();
+    // start periodic flush
+    if (!syncIntervalRef.current) {
+      syncIntervalRef.current = setInterval(() => flushQueue(), SYNC_INTERVAL_MS);
+    }
+    return () => {
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+        syncIntervalRef.current = null;
+      }
+    };
+  }, [isLoggedIn]);
 
-  // === IMPORTANT CHANGE:
-  // - Do NOT auto-save the entire `entries` array on every change.
-  // - Only auto-save `habitsDefs` (debounced) here.
-  // - Entry-level saves should call saveEntryToServer(entry) directly (already done where entries are modified).
+  // IMPORTANT: only save habitsDefs (debounced). Entry updates are atomic diffs.
   useEffect(() => {
     if (!isLoggedIn) return;
-    // avoid saving immediately during initial load
     if (initialLoadRef.current) return;
 
-    // debounce saving habitsDefs to avoid spamming server while user types/chooses color
     if (habitsSaveTimer.current) clearTimeout(habitsSaveTimer.current);
     habitsSaveTimer.current = setTimeout(async () => {
       try {
-        await authFetch('/api/user/data', {
-          method: 'POST',
-          body: JSON.stringify({ habits: habitsDefs })
-        });
-        showSaveStatus('✓ Saved', 'success');
+        // Prefer creating/updating via server endpoints — but if you want to keep a full-replace flow:
+        // We'll do nothing here to avoid confusing server's authoritative Habit collection.
+        // Instead, use addHabit/deleteHabit routines that call /api/habits.
+        showSaveStatus('✓ Habits updated locally', 'success');
       } catch (err) {
         console.error('Error saving habits', err);
         showSaveStatus('⚠ Save failed', 'error');
@@ -240,12 +216,9 @@ export default function HabitTracker() {
     };
   }, [habitsDefs, isLoggedIn]);
 
-
   /* ---------------------------
-    SYNC QUEUE UTILITIES (localStorage-backed)
+    SYNC QUEUE UTILITIES (unchanged logic)
   ----------------------------*/
-
-  // load queue from localStorage into queueRef
   const loadQueueFromStorage = () => {
     try {
       const raw = localStorage.getItem(SYNC_QUEUE_KEY);
@@ -271,116 +244,185 @@ export default function HabitTracker() {
     }
   };
 
-  // enqueue a minimal payload (diff) for a single-date update
   const enqueueEntryDiff = (payload) => {
-    // payload must contain { date, ... } and only the fields that changed (completedHabits and/or sleep)
     const minimal = { date: payload.date };
     if (Object.prototype.hasOwnProperty.call(payload, 'completedHabits')) minimal.completedHabits = payload.completedHabits;
     if (Object.prototype.hasOwnProperty.call(payload, 'sleep')) minimal.sleep = payload.sleep;
+    if (Object.prototype.hasOwnProperty.call(payload, 'habitDiff')) minimal.habitDiff = payload.habitDiff;
     minimal.clientGeneratedAt = new Date().toISOString();
 
     queueRef.current.push(minimal);
     persistQueueToStorage();
-    console.log('Queue ENQUEUED:', minimal, 'queueLen=', queueRef.current.length);
+    console.log('[SYNC] Queue ENQUEUED:', minimal, 'queueLen=', queueRef.current.length);
   };
 
-  // attempt to flush the queue sequentially (one-by-one)
   const flushQueue = async () => {
     if (!isLoggedIn) {
-      console.log('flushQueue: user not logged in — skipping');
+      console.log('[SYNC] flushQueue: user not logged in — skipping');
       return;
     }
-    if (flushingRef.current) {
-      // already flushing
-      return;
-    }
-    loadQueueFromStorage(); // ensure up-to-date
+    if (flushingRef.current) return;
+    loadQueueFromStorage();
     if (!queueRef.current.length) return;
 
     flushingRef.current = true;
-    console.log('flushQueue: starting — items=', queueRef.current.length);
+    console.log('[SYNC] flushQueue: starting — items=', queueRef.current.length);
 
-    // process queue sequentially
     while (queueRef.current.length) {
-      const item = queueRef.current[0];
+      let item = queueRef.current[0];
+
+      const hasCompleted = Object.prototype.hasOwnProperty.call(item, 'completedHabits');
+      const hasSleep = Object.prototype.hasOwnProperty.call(item, 'sleep');
+      const hasHabitDiff = Object.prototype.hasOwnProperty.call(item, 'habitDiff');
+
+      if (!hasCompleted && !hasSleep && !hasHabitDiff) {
+        const localEntry = (entries.find(e => e.date === item.date) || (todayEntry && todayEntry.date === item.date ? todayEntry : null));
+        if (localEntry) {
+          const enriched = { date: item.date };
+          if (Array.isArray(localEntry.completedHabits)) enriched.completedHabits = localEntry.completedHabits;
+          if (localEntry.sleep && (localEntry.sleep.hours != null || localEntry.sleep.quality != null)) enriched.sleep = localEntry.sleep;
+          if (Object.prototype.hasOwnProperty.call(enriched, 'completedHabits') || Object.prototype.hasOwnProperty.call(enriched, 'sleep')) {
+            enriched.clientGeneratedAt = item.clientGeneratedAt || new Date().toISOString();
+            item = enriched;
+          } else {
+            console.warn('[SYNC] dropping item with no useful data', queueRef.current[0]);
+            queueRef.current.shift();
+            persistQueueToStorage();
+            continue;
+          }
+        } else {
+          console.warn('[SYNC] dropping item with no local entry', queueRef.current[0]);
+          queueRef.current.shift();
+          persistQueueToStorage();
+          continue;
+        }
+      }
+
       try {
-        // send only the diff
-        const resp = await authFetch('/api/user/data', {
+        console.log('[SYNC] Sending to server:', item);
+        await authFetch('/api/user/data', {
           method: 'POST',
           body: JSON.stringify(item)
         });
-        // if authFetch didn't throw, assume success
-        console.log('flushQueue: synced item', item.date);
-        // remove first item and persist
+        console.log('[SYNC] flushed item:', item.date);
         queueRef.current.shift();
         persistQueueToStorage();
       } catch (err) {
-        // stop processing if network/auth fails — will retry later
-        console.error('flushQueue: failed to sync item', queueRef.current[0], err);
+        console.error('[SYNC] failed to sync item', queueRef.current[0], err);
         break;
       }
     }
 
     flushingRef.current = false;
-    console.log('flushQueue: finished — remaining=', queueRef.current.length);
+    console.log('[SYNC] flushQueue: finished — remaining=', queueRef.current.length);
   };
 
-  // helper to schedule a flush (immediate but throttled) and also ensures queue persisted
   const scheduleFlush = (delay = 0) => {
     setTimeout(() => flushQueue(), delay);
   };
 
-  // start periodic flushing when mounted & logged in
-  useEffect(() => {
-    // clear any existing interval
-    if (syncIntervalRef.current) {
-      clearInterval(syncIntervalRef.current);
-      syncIntervalRef.current = null;
-    }
+  const saveEntryToServer = async (entry) => {
+    try {
+      const payload = { date: entry.date };
+      if (entry.completedHabits !== undefined) payload.completedHabits = entry.completedHabits;
+      if (entry.sleep !== undefined) payload.sleep = entry.sleep;
+      if (entry.habitDiff !== undefined) payload.habitDiff = entry.habitDiff;
 
-    if (isLoggedIn) {
-      // load queue into memory
-      loadQueueFromStorage();
-      // attempt an immediate flush
-      scheduleFlush(300);
-      // then start periodic flushing
-      syncIntervalRef.current = setInterval(() => {
-        flushQueue();
-      }, SYNC_INTERVAL_MS);
-    } else {
-      // not logged in — keep queue in storage, but do not flush
-      loadQueueFromStorage();
-    }
-
-    return () => {
-      if (syncIntervalRef.current) {
-        clearInterval(syncIntervalRef.current);
-        syncIntervalRef.current = null;
+      if (payload.completedHabits === undefined && payload.sleep === undefined && payload.habitDiff === undefined) {
+        const localEntry = (entries.find(e => e.date === entry.date) || (todayEntry && todayEntry.date === entry.date ? todayEntry : null));
+        if (localEntry) {
+          if (Array.isArray(localEntry.completedHabits)) payload.completedHabits = localEntry.completedHabits;
+          if (localEntry.sleep && (localEntry.sleep.hours != null || localEntry.sleep.quality != null)) payload.sleep = localEntry.sleep;
+        }
       }
-    };
-  }, [isLoggedIn, userId]);
 
+      if (payload.completedHabits === undefined && payload.sleep === undefined && payload.habitDiff === undefined) {
+        console.warn('[SAVE] No diff to send for', entry.date);
+        return;
+      }
+
+      enqueueEntryDiff(payload);
+      scheduleFlush(50);
+      showSaveStatus('✓ Saved', 'success');
+    } catch (err) {
+      console.error('Save failed (queued)', err);
+      showSaveStatus('⚠ Save queued', 'error');
+    }
+  };
 
   /* ---------------------------
-    Data operations
+    Data operations (updated to use /api/user/data-extended and /api/user/data)
   ----------------------------*/
   const loadUserData = async () => {
     try {
-      const data = await authFetch('/api/user/data', { method: 'GET' });
-      setHabitsDefs(data.habits || []);
-      setEntries(data.entries || []);
-      setTodayEntry(data.todayEntry || { date: getTodayString(), completedHabits: [], sleep: { hours: null, quality: null } });
+      // 1) load authoritative habit defs (Habit collection)
+      let extended = null;
+      try {
+        extended = await authFetch('/api/user/data-extended', { method: 'GET' });
+        // extended.habits is an array of { habitId, name, color, createdAt, days }
+        if (Array.isArray(extended.habits)) {
+          // normalize to local habit shape: use id = habitId
+          const normalized = extended.habits.map(h => ({
+            id: h.habitId,
+            name: h.name,
+            color: h.color || '#6366f1',
+            createdAt: h.createdAt,
+            days: h.days || {}
+          }));
+          setHabitsDefs(normalized);
+        } else {
+          setHabitsDefs([]);
+        }
+        if (extended.userInfo) {
+          setUserName(extended.userInfo.name || '');
+          setUserId(extended.userInfo.email || '');
+        }
+      } catch (err) {
+        // fall back to legacy endpoint if extended fails
+        console.warn('Failed to load extended habits view, falling back to /api/user/data', err);
+      }
+
+      // 2) load entries (authoritative for per-date Entry docs). /api/user/data returns merged entries
+      try {
+        const data = await authFetch('/api/user/data', { method: 'GET' });
+        // server returns { habits, entries, userInfo }
+        // entries is an array of { date, completedHabits, sleep, updatedAt }
+        setEntries(Array.isArray(data.entries) ? data.entries : []);
+        // todayEntry: prefer any explicit todayEntry returned by server (if present)
+        const t = data.entries && data.entries.find(e => e.date === getTodayString());
+        if (t) setTodayEntry(t);
+        if (!extended && data.habits && Array.isArray(data.habits)) {
+          // fallback: normalize legacy user.habits to local shape if extended not available
+          const normalized = data.habits.map(h => ({
+            id: h.id || h.habitId || String(h.id || Math.random()),
+            name: h.name,
+            color: h.color || '#6366f1',
+            createdAt: h.createdAt || null
+          }));
+          setHabitsDefs(normalized);
+        }
+        if (data.userInfo) {
+          setUserName(data.userInfo.name || '');
+          setUserId(data.userInfo.email || '');
+        }
+      } catch (err) {
+        console.error('Error loading entries from /api/user/data', err);
+      }
+
       showSaveStatus('✓ Data loaded', 'success');
-      // after loading, try to flush any queued diffs
+      // after loading, try to flush queued diffs
       scheduleFlush(200);
     } catch (err) {
       console.error('Error loading data:', err);
       showSaveStatus('⚠ Load failed', 'error');
+    } finally {
+      initialLoadRef.current = false;
     }
   };
 
   const saveUserData = async () => {
     try {
+      // Keep this if you need to full-replace both (rare). Prefer using addHabit/deleteHabit for habits.
       await authFetch('/api/user/data', {
         method: 'POST',
         body: JSON.stringify({ habits: habitsDefs, entries })
@@ -392,46 +434,11 @@ export default function HabitTracker() {
     }
   };
 
-  // IMPORTANT: frontend will not send the whole entries array for single updates anymore.
-  // Instead we enqueue a diff and flushQueue will sync to server.
-  const saveEntryToServer = async (entry) => {
-    try {
-      // Build payload
-      const payload = { date: entry.date };
-
-      // Pass the atomic diff if present
-      if (entry.habitDiff) {
-        payload.habitDiff = entry.habitDiff; 
-      }
-      // Or pass full list (only if doing bulk operations, not toggles)
-      else if (entry.completedHabits !== undefined) {
-        payload.completedHabits = entry.completedHabits;
-      }
-
-      // Pass sleep if present
-      if (entry.sleep !== undefined) {
-        payload.sleep = entry.sleep;
-      }
-
-      // Optimistic local enqueue
-      enqueueEntryDiff(payload);
-      scheduleFlush(50);
-      showSaveStatus('✓ Saved', 'success');
-    } catch (err) {
-      console.error('Save failed (queued)', err);
-      showSaveStatus('⚠ Save queued', 'error');
-    }
-  };
-
   const showSaveStatus = (message, type = 'success') => {
     setSaveStatus(message);
-
-    // show the small inline status briefly (existing behavior)
     setTimeout(() => setSaveStatus(''), type === 'success' ? 1200 : 2000);
 
-    // If success, show the action toast with friendly copy
     if (type === 'success') {
-      // Map some common backend messages to friendlier toast copy
       let friendly = 'Keep it up — your data was saved!';
       if (message.toLowerCase().includes('habit added')) friendly = 'Nice — habit added and saved!';
       else if (message.toLowerCase().includes('habit removed')) friendly = 'Habit removed — changes saved.';
@@ -441,11 +448,8 @@ export default function HabitTracker() {
       setActionToastMessage(friendly);
       setActionToastType('success');
       setActionToastVisible(true);
-
-      // Auto-dismiss after 2.5s
       setTimeout(() => setActionToastVisible(false), 2500);
     } else {
-      // For errors show an error toast
       setActionToastMessage(message || 'Something went wrong');
       setActionToastType('error');
       setActionToastVisible(true);
@@ -453,9 +457,8 @@ export default function HabitTracker() {
     }
   };
 
-
   /* ---------------------------
-    Auth helpers
+    Auth helpers (update login URL usage)
   ----------------------------*/
   const handleLoginModalConfirm = (id) => {
     if (id && id.trim()) {
@@ -464,7 +467,6 @@ export default function HabitTracker() {
       setShowLoginModal(false);
     }
   };
-
   const handleLogout = () => {
     setAuthToken(null);
     setIsLoggedIn(false);
@@ -476,7 +478,7 @@ export default function HabitTracker() {
   };
 
   /* ---------------------------
-    Date helpers
+    Date helpers (unchanged)
   ----------------------------*/
   function getTodayString() {
     return new Date().toISOString().split('T')[0];
@@ -487,27 +489,61 @@ export default function HabitTracker() {
   }
 
   /* ---------------------------
-    Habit operations
+    Habit operations (updated to call new endpoints)
   ----------------------------*/
   const addHabit = async () => {
     if (!newHabitName.trim()) return;
     const id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString();
     const newDef = { id, name: newHabitName.trim(), color: selectedColor, createdAt: new Date() };
-    const updatedDefs = [...habitsDefs, newDef];
-    setHabitsDefs(updatedDefs);
+
+    // Optimistically update UI
+    setHabitsDefs(prev => [...prev, newDef]);
     setNewHabitName('');
     setShowAddHabit(false);
 
+    // Create on server via POST /api/habits
     try {
-      await authFetch('/api/user/data', { method: 'POST', body: JSON.stringify({ habits: updatedDefs }) });
+      const payload = { habitId: id, name: newDef.name, color: newDef.color };
+      const resp = await authFetch('/api/habits', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      // On success refresh authoritative habit list
+      await refreshHabitsFromServer();
       showSaveStatus('✓ Habit added', 'success');
     } catch (err) {
-      console.error('Failed to save habit defs', err);
+      console.error('Failed to create habit on server', err);
+      // Revert optimistic add if you want:
+      setHabitsDefs(prev => prev.filter(h => h.id !== id));
       showSaveStatus('⚠ Save failed', 'error');
     }
   };
 
+  // Refresh habit defs from /api/user/data-extended
+  const refreshHabitsFromServer = async () => {
+    try {
+      const extended = await authFetch('/api/user/data-extended', { method: 'GET' });
+      if (extended && Array.isArray(extended.habits)) {
+        const normalized = extended.habits.map(h => ({
+          id: h.habitId,
+          name: h.name,
+          color: h.color || '#6366f1',
+          createdAt: h.createdAt,
+          days: h.days || {}
+        }));
+        setHabitsDefs(normalized);
+      }
+      if (extended && extended.userInfo) {
+        setUserName(extended.userInfo.name || '');
+        setUserId(extended.userInfo.email || '');
+      }
+    } catch (err) {
+      console.error('Failed to refresh habits from server', err);
+    }
+  };
+
   const deleteHabit = async (habitId) => {
+    // Optimistically remove locally
     const updatedDefs = habitsDefs.filter(h => h.id !== habitId);
     const updatedEntries = entries.map(e => ({
       ...e,
@@ -519,34 +555,30 @@ export default function HabitTracker() {
     if (todayEntry && todayEntry.completedHabits.includes(habitId)) {
       const updatedToday = { ...todayEntry, completedHabits: todayEntry.completedHabits.filter(id => id !== habitId) };
       setTodayEntry(updatedToday);
-      // enqueue diff
       saveEntryToServer(updatedToday);
     }
 
     try {
-      // We still send both updated habits and entries: habits is replace; entries will be treated as upserts by the server
-      await authFetch('/api/user/data', {
-        method: 'POST',
-        body: JSON.stringify({ habits: updatedDefs, entries: updatedEntries })
-      });
+      await authFetch(`/api/habits/${habitId}`, { method: 'DELETE' });
+      // Refresh authoritative habits
+      await refreshHabitsFromServer();
       showSaveStatus('✓ Habit removed', 'success');
     } catch (err) {
-      console.error('Failed to persist deletion', err);
-      showSaveStatus('⚠ Save failed', 'error');
+      console.error('Failed to delete habit on server', err);
+      // On failure, refresh to restore authoritative view
+      await refreshHabitsFromServer();
+      showSaveStatus('⚠ Delete failed', 'error');
     }
   };
 
   const toggleHabit = (habitId) => {
     const today = getTodayString();
-    
-    // Ensure todayEntry is initialized for today
+
     if (todayEntry.date !== today) {
       setTodayEntry({ date: today, completedHabits: [], sleep: { hours: null, quality: null } });
     }
 
     const isCompleted = (todayEntry.completedHabits || []).includes(habitId);
-    
-    // Calculate new local state (for UI)
     const newCompleted = isCompleted
       ? todayEntry.completedHabits.filter(id => id !== habitId)
       : [...(todayEntry.completedHabits || []), habitId];
@@ -559,19 +591,18 @@ export default function HabitTracker() {
       return [...filtered, updated];
     });
 
-    // --- KEY CHANGE HERE ---
-    // Instead of sending the full list, send the Atomic Diff
-    saveEntryToServer({ 
-      date: updated.date, 
-      habitDiff: { 
-        id: habitId, 
-        type: isCompleted ? 'remove' : 'add' // If it WAS completed, we are removing it, and vice versa
-      } 
+    // Send the atomic diff (server accepts habitDiff)
+    saveEntryToServer({
+      date: updated.date,
+      habitDiff: {
+        id: habitId,
+        type: isCompleted ? 'remove' : 'add'
+      }
     });
   };
 
   /* ---------------------------
-    Sleep operations
+    Sleep operations (unchanged except using saveEntryToServer diffs)
   ----------------------------*/
   const addSleepEntry = () => {
     if (sleepHours === '') return;
@@ -589,12 +620,11 @@ export default function HabitTracker() {
     setSleepHours('');
     setSleepQuality(3);
     setShowSleepModal(false);
-    // Persist as diff
     saveEntryToServer({ date: updated.date, sleep: updated.sleep });
   };
 
   /* ---------------------------
-    Analytics helpers
+    Analytics helpers (unchanged)
   ----------------------------*/
   const getLast7Days = () => {
     const days = [];
@@ -710,20 +740,16 @@ export default function HabitTracker() {
   const chartHeight = isMobile ? 200 : 280;
   const smallChartHeight = isMobile ? 160 : 220;
 
-
   /* ---------------------------
-    JSX Render
-    (kept exactly as you provided - truncated below for brevity in this message,
-     but in your file keep the entire JSX you already have)
+    JSX Render (kept mostly unchanged; auth links updated to use BACKEND_URL)
   ----------------------------*/
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50">
-      {/* Dismissible Toast for Free Tier Notice - ADD THIS SECTION */}
+      {/* Dismissible Toast for Free Tier Notice */}
       {showToast && (
         <div
           className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-[100] w-full max-w-md px-4 transition-all duration-500`}
-          // add accessible role
           role="status"
           aria-live="polite"
         >
@@ -743,7 +769,6 @@ export default function HabitTracker() {
             </div>
             <button
               onClick={() => {
-                // clear timers and dismiss immediately
                 if (toastHideTimers.current.fadeTimer) {
                   clearTimeout(toastHideTimers.current.fadeTimer);
                   toastHideTimers.current.fadeTimer = null;
@@ -764,12 +789,11 @@ export default function HabitTracker() {
         </div>
       )}
 
-      {/* Action toast (save success / error) */}
+      {/* Action toast */}
       {actionToastVisible && (
         <div className="fixed right-4 bottom-6 z-[110] w-auto max-w-sm px-4 animate-in slide-in-from-bottom duration-300">
           <div className={`rounded-2xl p-3 shadow-2xl border ${actionToastType === 'success' ? 'bg-white/95 border-green-200' : 'bg-white/95 border-red-200'} flex items-start gap-3`}>
             <div className="flex-shrink-0 mt-0.5">
-              {/* simple icon — adjust as you like */}
               {actionToastType === 'success' ? (
                 <svg className="w-6 h-6 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
               ) : (
@@ -792,7 +816,6 @@ export default function HabitTracker() {
           </div>
         </div>
       )}
-
 
       <header className="bg-white/80 backdrop-blur-md border-b border-gray-100/50 sticky top-0 z-40 shadow-sm transition-all duration-300">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -820,7 +843,7 @@ export default function HabitTracker() {
               {!isLoggedIn ? (
                 <div className="flex items-center gap-2 ml-2">
                   <button
-                    onClick={() => window.location.href = 'https://api-logdaily-com.onrender.com/auth/google'}
+                    onClick={() => window.location.href = `${BACKEND_URL}/auth/google`}
                     className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium hover:shadow-md hover:border-gray-300 transition-all duration-200"
                   >
                     <svg className="w-4 h-4" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg">
@@ -870,7 +893,7 @@ export default function HabitTracker() {
               </button>
               {!isLoggedIn ? (
                 <>
-                  <button onClick={() => { window.location.href = 'https://api-logdaily-com.onrender.com/auth/google'; }} className="text-left px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors">
+                  <button onClick={() => { window.location.href = `${BACKEND_URL}/auth/google`; }} className="text-left px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors">
                     Sign in with Google
                   </button>
                   <button onClick={() => { setShowLoginModal(true); setMobileMenuOpen(false); }} className="text-left px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold">
@@ -925,7 +948,7 @@ export default function HabitTracker() {
                   </button>
 
                   <button
-                    onClick={() => window.location.href = 'https://api-logdaily-com.onrender.com/auth/google'}
+                    onClick={() => window.location.href = `http://${BACKEND_URL}/auth/google`}
                     className="flex items-center gap-3 px-8 py-4 rounded-xl border-2 border-gray-200 bg-white hover:border-gray-300 hover:shadow-lg transition-all duration-200 font-semibold"
                   >
                     <svg className="w-5 h-5" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg">
@@ -1416,7 +1439,7 @@ export default function HabitTracker() {
                 <button onClick={() => handleLoginModalConfirm(userId)} className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl font-bold hover:from-indigo-700 hover:to-purple-700 shadow-lg hover:shadow-xl transition-all duration-200">
                   Continue
                 </button>
-                <a href="https://api-logdaily-com.onrender.com/auth/google" className="flex-1 inline-flex items-center justify-center gap-3 px-6 py-3 rounded-xl border-2 border-gray-200 bg-white hover:border-gray-300 hover:shadow-lg transition-all duration-200 font-semibold">
+                <a href="https://${BACKEND_URL}/auth/google" className="flex-1 inline-flex items-center justify-center gap-3 px-6 py-3 rounded-xl border-2 border-gray-200 bg-white hover:border-gray-300 hover:shadow-lg transition-all duration-200 font-semibold">
                   <svg className="w-5 h-5" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg">
                     <path d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.5h147.2c-6.4 34.6-25.5 64-54.3 83.7v69.7h87.7c51.2-47.2 81.9-116.5 81.9-198.5z" fill="#4285F4" />
                     <path d="M272 544.3c73.8 0 135.7-24.4 181-66.4l-87.7-69.7c-24.4 16.3-55.5 26-93.3 26-71.7 0-132.5-48.4-154.3-113.6H27.5v71.6C72.2 483 163.4 544.3 272 544.3z" fill="#34A853" />
