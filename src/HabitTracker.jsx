@@ -8,6 +8,10 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 import { setAuthToken, getAuthToken, authFetch } from './api';
+// State
+
+
+// Toast JSX (place at the top of your return/render)
 
 /* ---------------------------
   localStorage polyfill for window.storage
@@ -62,6 +66,7 @@ export default function HabitTracker() {
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 640 : false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showToast, setShowToast] = useState(true);
 
   const colors = ['#6366f1', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#f97316'];
 
@@ -431,13 +436,37 @@ export default function HabitTracker() {
 
   const chartHeight = isMobile ? 200 : 280;
   const smallChartHeight = isMobile ? 160 : 220;
+  
 
   /* ---------------------------
     JSX Render
   ----------------------------*/
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50">
-      {/* Enhanced Header */}
+      {/* Dismissible Toast for Free Tier Notice - ADD THIS SECTION */}
+      {showToast && (
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-[100] w-full max-w-md px-4 animate-in slide-in-from-top duration-500">
+          <div className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-2xl shadow-2xl p-4 flex items-start gap-3 border border-blue-400/50">
+            <div className="flex-shrink-0 mt-0.5">
+              <Info className="w-7 h-7" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm mb-1">Backend on Free Tier</p>
+              <p className="text-xs text-blue-50 leading-relaxed">
+                Users logging in via Google may face a brief 30–60 second delay as our backend initializes on free hosting. We appreciate your patience!
+              </p>
+            </div>
+            <button
+              onClick={() => setShowToast(false)}
+              className="flex-shrink-0 text-white/80 hover:text-white hover:bg-white/10 rounded-lg p-1 transition-all duration-200"
+              aria-label="Dismiss notification"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      )}
+      
       <header className="bg-white/80 backdrop-blur-md border-b border-gray-100/50 sticky top-0 z-40 shadow-sm transition-all duration-300">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
