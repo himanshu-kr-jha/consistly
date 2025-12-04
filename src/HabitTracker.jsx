@@ -48,10 +48,10 @@ export default function HabitTracker() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [habitsDefs, setHabitsDefs] = useState([]);
   const [entries, setEntries] = useState([]);
-  const [todayEntry, setTodayEntry] = useState({ 
-    date: getTodayString(), 
-    completedHabits: [], 
-    sleep: { hours: null, quality: null } 
+  const [todayEntry, setTodayEntry] = useState({
+    date: getTodayString(),
+    completedHabits: [],
+    sleep: { hours: null, quality: null }
   });
 
   // UI State
@@ -67,6 +67,10 @@ export default function HabitTracker() {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showToast, setShowToast] = useState(true);
+  // Action toast for saves (distinct from the free-tier toast)
+  const [actionToastVisible, setActionToastVisible] = useState(false);
+  const [actionToastMessage, setActionToastMessage] = useState('');
+  const [actionToastType, setActionToastType] = useState('success'); // could be 'success' or 'error'
 
   const colors = ['#6366f1', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#f97316'];
 
@@ -193,8 +197,34 @@ export default function HabitTracker() {
 
   const showSaveStatus = (message, type = 'success') => {
     setSaveStatus(message);
+
+    // show the small inline status briefly (existing behavior)
     setTimeout(() => setSaveStatus(''), type === 'success' ? 1200 : 2000);
+
+    // If success, show the action toast with friendly copy
+    if (type === 'success') {
+      // Map some common backend messages to friendlier toast copy
+      let friendly = 'Keep it up — your data was saved!';
+      if (message.toLowerCase().includes('habit added')) friendly = 'Nice — habit added and saved!';
+      else if (message.toLowerCase().includes('habit removed')) friendly = 'Habit removed — changes saved.';
+      else if (message.toLowerCase().includes('data loaded')) friendly = 'Data loaded successfully.';
+      else if (message.toLowerCase().includes('saved') || message.startsWith('✓')) friendly = 'Keep it up — your data was saved!';
+
+      setActionToastMessage(friendly);
+      setActionToastType('success');
+      setActionToastVisible(true);
+
+      // Auto-dismiss after 2.5s
+      setTimeout(() => setActionToastVisible(false), 2500);
+    } else {
+      // For errors show an error toast
+      setActionToastMessage(message || 'Something went wrong');
+      setActionToastType('error');
+      setActionToastVisible(true);
+      setTimeout(() => setActionToastVisible(false), 3500);
+    }
   };
+
 
   /* ---------------------------
     Auth helpers
@@ -239,7 +269,7 @@ export default function HabitTracker() {
     setHabitsDefs(updatedDefs);
     setNewHabitName('');
     setShowAddHabit(false);
-    
+
     try {
       await authFetch('/api/user/data', { method: 'POST', body: JSON.stringify({ habits: updatedDefs }) });
       showSaveStatus('✓ Habit added', 'success');
@@ -257,13 +287,13 @@ export default function HabitTracker() {
     }));
     setHabitsDefs(updatedDefs);
     setEntries(updatedEntries);
-    
+
     if (todayEntry && todayEntry.completedHabits.includes(habitId)) {
       const updatedToday = { ...todayEntry, completedHabits: todayEntry.completedHabits.filter(id => id !== habitId) };
       setTodayEntry(updatedToday);
       await saveEntryToServer(updatedToday);
     }
-    
+
     try {
       await authFetch('/api/user/data', {
         method: 'POST',
@@ -436,7 +466,7 @@ export default function HabitTracker() {
 
   const chartHeight = isMobile ? 200 : 280;
   const smallChartHeight = isMobile ? 160 : 220;
-  
+
 
   /* ---------------------------
     JSX Render
@@ -466,7 +496,36 @@ export default function HabitTracker() {
           </div>
         </div>
       )}
-      
+      {/* Action toast (save success / error) */}
+      {actionToastVisible && (
+        <div className="fixed right-4 bottom-6 z-[110] w-auto max-w-sm px-4 animate-in slide-in-from-bottom duration-300">
+          <div className={`rounded-2xl p-3 shadow-2xl border ${actionToastType === 'success' ? 'bg-white/95 border-green-200' : 'bg-white/95 border-red-200'} flex items-start gap-3`}>
+            <div className="flex-shrink-0 mt-0.5">
+              {/* simple icon — adjust as you like */}
+              {actionToastType === 'success' ? (
+                <svg className="w-6 h-6 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+              ) : (
+                <svg className="w-6 h-6 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              )}
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-gray-800">{actionToastMessage}</p>
+              <p className="text-xs text-gray-500 mt-0.5">{actionToastType === 'success' ? 'Saved to backend' : 'Save failed'}</p>
+            </div>
+
+            <button
+              onClick={() => setActionToastVisible(false)}
+              className="ml-3 text-gray-400 hover:text-gray-600 p-1 rounded-lg"
+              aria-label="Dismiss"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+
       <header className="bg-white/80 backdrop-blur-md border-b border-gray-100/50 sticky top-0 z-40 shadow-sm transition-all duration-300">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
@@ -489,7 +548,7 @@ export default function HabitTracker() {
               <button onClick={() => setShowVisualization(true)} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all duration-200">
                 Insights
               </button>
-              
+
               {!isLoggedIn ? (
                 <div className="flex items-center gap-2 ml-2">
                   <button
@@ -497,10 +556,10 @@ export default function HabitTracker() {
                     className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium hover:shadow-md hover:border-gray-300 transition-all duration-200"
                   >
                     <svg className="w-4 h-4" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.5h147.2c-6.4 34.6-25.5 64-54.3 83.7v69.7h87.7c51.2-47.2 81.9-116.5 81.9-198.5z" fill="#4285F4"/>
-                      <path d="M272 544.3c73.8 0 135.7-24.4 181-66.4l-87.7-69.7c-24.4 16.3-55.5 26-93.3 26-71.7 0-132.5-48.4-154.3-113.6H27.5v71.6C72.2 483 163.4 544.3 272 544.3z" fill="#34A853"/>
-                      <path d="M117.7 326.2c-10.3-30.8-10.3-64 0-94.8V159.8H27.5c-39.8 79.4-39.8 173.5 0 252.9l90.2-86.5z" fill="#FBBC05"/>
-                      <path d="M272 107.7c39 0 74 13.4 101.6 39.6l76.2-76.1C407.7 25.8 345.8 0 272 0 163.4 0 72.2 61.3 27.5 159.8l90.2 71.6C139.5 156.1 200.3 107.7 272 107.7z" fill="#EA4335"/>
+                      <path d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.5h147.2c-6.4 34.6-25.5 64-54.3 83.7v69.7h87.7c51.2-47.2 81.9-116.5 81.9-198.5z" fill="#4285F4" />
+                      <path d="M272 544.3c73.8 0 135.7-24.4 181-66.4l-87.7-69.7c-24.4 16.3-55.5 26-93.3 26-71.7 0-132.5-48.4-154.3-113.6H27.5v71.6C72.2 483 163.4 544.3 272 544.3z" fill="#34A853" />
+                      <path d="M117.7 326.2c-10.3-30.8-10.3-64 0-94.8V159.8H27.5c-39.8 79.4-39.8 173.5 0 252.9l90.2-86.5z" fill="#FBBC05" />
+                      <path d="M272 107.7c39 0 74 13.4 101.6 39.6l76.2-76.1C407.7 25.8 345.8 0 272 0 163.4 0 72.2 61.3 27.5 159.8l90.2 71.6C139.5 156.1 200.3 107.7 272 107.7z" fill="#EA4335" />
                     </svg>
                     <span className="hidden lg:inline">Sign in</span>
                   </button>
@@ -570,25 +629,25 @@ export default function HabitTracker() {
           <section className="mt-6 bg-gradient-to-br from-indigo-50 via-white to-purple-50 rounded-3xl shadow-2xl p-8 sm:p-12 border border-indigo-100/50 mb-8 overflow-hidden relative group">
             <div className="absolute -top-24 -right-24 w-96 h-96 rounded-full bg-gradient-to-br from-indigo-200/30 to-purple-200/30 blur-3xl group-hover:scale-110 transition-transform duration-700"></div>
             <div className="absolute -bottom-24 -left-24 w-96 h-96 rounded-full bg-gradient-to-tr from-purple-200/30 to-pink-200/30 blur-3xl group-hover:scale-110 transition-transform duration-700"></div>
-            
+
             <div className="grid md:grid-cols-2 gap-8 items-center relative z-10">
               <div>
                 <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/80 backdrop-blur-sm border border-indigo-200 text-sm font-medium text-indigo-700 mb-4 shadow-sm">
                   <Sparkles className="w-4 h-4" />
                   Start your journey today
                 </div>
-                
+
                 <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 mb-4 leading-tight">
                   Build small habits<br />that <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">add up.</span>
                 </h1>
-                
+
                 <p className="text-lg text-gray-600 mb-8 leading-relaxed">
                   Track daily activities, log sleep, and visualize 30-day trends. Start quickly with a username — or sign in with Google to sync across devices.
                 </p>
 
                 <div className="flex gap-4 flex-wrap mb-8">
-                  <button 
-                    onClick={() => setShowLoginModal(true)} 
+                  <button
+                    onClick={() => setShowLoginModal(true)}
                     className="group px-8 py-4 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-200 flex items-center gap-2"
                   >
                     Get started
@@ -596,16 +655,16 @@ export default function HabitTracker() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                     </svg>
                   </button>
-                  
-                  <button 
-                    onClick={() => window.location.href = 'https://api-logdaily-com.onrender.com/auth/google'} 
+
+                  <button
+                    onClick={() => window.location.href = 'https://api-logdaily-com.onrender.com/auth/google'}
                     className="flex items-center gap-3 px-8 py-4 rounded-xl border-2 border-gray-200 bg-white hover:border-gray-300 hover:shadow-lg transition-all duration-200 font-semibold"
                   >
                     <svg className="w-5 h-5" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.5h147.2c-6.4 34.6-25.5 64-54.3 83.7v69.7h87.7c51.2-47.2 81.9-116.5 81.9-198.5z" fill="#4285F4"/>
-                      <path d="M272 544.3c73.8 0 135.7-24.4 181-66.4l-87.7-69.7c-24.4 16.3-55.5 26-93.3 26-71.7 0-132.5-48.4-154.3-113.6H27.5v71.6C72.2 483 163.4 544.3 272 544.3z" fill="#34A853"/>
-                      <path d="M117.7 326.2c-10.3-30.8-10.3-64 0-94.8V159.8H27.5c-39.8 79.4-39.8 173.5 0 252.9l90.2-86.5z" fill="#FBBC05"/>
-                      <path d="M272 107.7c39 0 74 13.4 101.6 39.6l76.2-76.1C407.7 25.8 345.8 0 272 0 163.4 0 72.2 61.3 27.5 159.8l90.2 71.6C139.5 156.1 200.3 107.7 272 107.7z" fill="#EA4335"/>
+                      <path d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.5h147.2c-6.4 34.6-25.5 64-54.3 83.7v69.7h87.7c51.2-47.2 81.9-116.5 81.9-198.5z" fill="#4285F4" />
+                      <path d="M272 544.3c73.8 0 135.7-24.4 181-66.4l-87.7-69.7c-24.4 16.3-55.5 26-93.3 26-71.7 0-132.5-48.4-154.3-113.6H27.5v71.6C72.2 483 163.4 544.3 272 544.3z" fill="#34A853" />
+                      <path d="M117.7 326.2c-10.3-30.8-10.3-64 0-94.8V159.8H27.5c-39.8 79.4-39.8 173.5 0 252.9l90.2-86.5z" fill="#FBBC05" />
+                      <path d="M272 107.7c39 0 74 13.4 101.6 39.6l76.2-76.1C407.7 25.8 345.8 0 272 0 163.4 0 72.2 61.3 27.5 159.8l90.2 71.6C139.5 156.1 200.3 107.7 272 107.7z" fill="#EA4335" />
                     </svg>
                     <span>Sign in with Google</span>
                   </button>
@@ -657,25 +716,25 @@ export default function HabitTracker() {
                   </h2>
                   <p className="text-sm text-gray-600">Keep building those amazing habits! 🎯</p>
                 </div>
-                
+
                 <div className={`flex ${isMobile ? 'flex-col w-full' : 'items-center gap-3'}`}>
                   {saveStatus && (
                     <span className="text-sm font-medium text-green-600 flex items-center gap-2 px-4 py-2 bg-green-50 rounded-lg border border-green-200">
                       {saveStatus}
                     </span>
                   )}
-                  
+
                   <div className={`flex gap-3 ${isMobile ? 'w-full' : ''}`}>
-                    <button 
-                      onClick={() => setShowVisualization(!showVisualization)} 
+                    <button
+                      onClick={() => setShowVisualization(!showVisualization)}
                       className={`flex-1 ${isMobile ? 'py-3' : 'px-5 py-3'} bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-200 flex items-center justify-center gap-2`}
                     >
                       <BarChart3 className="w-5 h-5" />
                       <span>{showVisualization ? 'Hide Insights' : 'View Insights'}</span>
                     </button>
-                    
-                    <button 
-                      onClick={() => setShowSleepModal(true)} 
+
+                    <button
+                      onClick={() => setShowSleepModal(true)}
                       className={`flex-1 ${isMobile ? 'py-3' : 'px-5 py-3'} bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-xl font-semibold shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-200 flex items-center justify-center gap-2`}
                     >
                       <Plus className="w-5 h-5" />
@@ -698,14 +757,14 @@ export default function HabitTracker() {
                     <RechartsLine data={prepareCompletionData()}>
                       <defs>
                         <linearGradient id="colorRate" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#6366f1" stopOpacity={0.8}/>
-                          <stop offset="95%" stopColor="#6366f1" stopOpacity={0.1}/>
+                          <stop offset="5%" stopColor="#6366f1" stopOpacity={0.8} />
+                          <stop offset="95%" stopColor="#6366f1" stopOpacity={0.1} />
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                       <XAxis dataKey="date" tick={{ fontSize: 11 }} angle={-45} textAnchor="end" height={80} stroke="#9ca3af" />
                       <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} stroke="#9ca3af" />
-                      <Tooltip 
+                      <Tooltip
                         contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}
                         labelStyle={{ fontWeight: 'bold', color: '#374151' }}
                       />
@@ -727,7 +786,7 @@ export default function HabitTracker() {
                           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                           <XAxis dataKey="date" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={70} stroke="#9ca3af" />
                           <YAxis domain={[0, 12]} tick={{ fontSize: 10 }} stroke="#9ca3af" />
-                          <Tooltip 
+                          <Tooltip
                             contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}
                           />
                           <Legend wrapperStyle={{ fontSize: '12px' }} />
@@ -746,7 +805,7 @@ export default function HabitTracker() {
                           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                           <XAxis dataKey="date" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={70} stroke="#9ca3af" />
                           <YAxis domain={[0, 5]} tick={{ fontSize: 10 }} stroke="#9ca3af" />
-                          <Tooltip 
+                          <Tooltip
                             contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}
                           />
                           <Legend wrapperStyle={{ fontSize: '12px' }} />
@@ -768,7 +827,7 @@ export default function HabitTracker() {
                         <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                         <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={70} stroke="#9ca3af" />
                         <YAxis tick={{ fontSize: 10 }} stroke="#9ca3af" />
-                        <Tooltip 
+                        <Tooltip
                           contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}
                         />
                         <Legend wrapperStyle={{ fontSize: '12px' }} />
@@ -788,7 +847,7 @@ export default function HabitTracker() {
                         <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                         <XAxis dataKey="week" tick={{ fontSize: 10 }} stroke="#9ca3af" />
                         <YAxis tick={{ fontSize: 10 }} stroke="#9ca3af" />
-                        <Tooltip 
+                        <Tooltip
                           contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '12px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}
                         />
                         <Legend wrapperStyle={{ fontSize: '12px' }} />
@@ -833,8 +892,8 @@ export default function HabitTracker() {
                   </div>
                   <h2 className="text-xl font-bold text-gray-800">Sleep Tracking</h2>
                 </div>
-                <button 
-                  onClick={() => setShowSleepModal(true)} 
+                <button
+                  onClick={() => setShowSleepModal(true)}
                   className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-5 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-200"
                 >
                   <Plus className="w-5 h-5" />
@@ -872,8 +931,8 @@ export default function HabitTracker() {
                   </div>
                   <h2 className="text-xl font-bold text-gray-800">Your Habits</h2>
                 </div>
-                <button 
-                  onClick={() => setShowAddHabit(true)} 
+                <button
+                  onClick={() => setShowAddHabit(true)}
                   className="flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-5 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl hover:scale-105 transition-all duration-200"
                 >
                   <Plus className="w-5 h-5" />
@@ -883,22 +942,22 @@ export default function HabitTracker() {
 
               {showAddHabit && (
                 <div className="mb-6 p-6 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl border-2 border-gray-200 animate-in fade-in slide-in-from-top duration-300">
-                  <input 
-                    type="text" 
-                    placeholder="Enter habit name..." 
-                    value={newHabitName} 
-                    onChange={(e) => setNewHabitName(e.target.value)} 
-                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-medium transition-all duration-200" 
-                    onKeyDown={(e) => e.key === 'Enter' && addHabit()} 
+                  <input
+                    type="text"
+                    placeholder="Enter habit name..."
+                    value={newHabitName}
+                    onChange={(e) => setNewHabitName(e.target.value)}
+                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-medium transition-all duration-200"
+                    onKeyDown={(e) => e.key === 'Enter' && addHabit()}
                   />
                   <div className="flex items-center gap-4 mb-4 flex-wrap">
                     <span className="text-sm text-gray-700 font-medium">Color:</span>
                     {colors.map(color => (
-                      <button 
-                        key={color} 
-                        onClick={() => setSelectedColor(color)} 
-                        className={`w-10 h-10 rounded-xl border-3 transition-all duration-200 hover:scale-110 ${selectedColor === color ? 'border-gray-800 scale-110 shadow-lg' : 'border-transparent'}`} 
-                        style={{ backgroundColor: color }} 
+                      <button
+                        key={color}
+                        onClick={() => setSelectedColor(color)}
+                        className={`w-10 h-10 rounded-xl border-3 transition-all duration-200 hover:scale-110 ${selectedColor === color ? 'border-gray-800 scale-110 shadow-lg' : 'border-transparent'}`}
+                        style={{ backgroundColor: color }}
                       />
                     ))}
                   </div>
@@ -948,11 +1007,10 @@ export default function HabitTracker() {
                               key={idx}
                               onClick={() => isToday && toggleHabit(habit.id)}
                               disabled={!isToday}
-                              className={`py-4 rounded-xl border-2 transition-all duration-200 text-center group/day relative overflow-hidden ${
-                                isCompleted ? 'shadow-md' : 'bg-white hover:bg-gray-50'
-                              } ${isToday ? 'cursor-pointer hover:scale-105 hover:shadow-lg' : 'cursor-default opacity-60'}`}
-                              style={{ 
-                                backgroundColor: isCompleted ? habit.color : undefined, 
+                              className={`py-4 rounded-xl border-2 transition-all duration-200 text-center group/day relative overflow-hidden ${isCompleted ? 'shadow-md' : 'bg-white hover:bg-gray-50'
+                                } ${isToday ? 'cursor-pointer hover:scale-105 hover:shadow-lg' : 'cursor-default opacity-60'}`}
+                              style={{
+                                backgroundColor: isCompleted ? habit.color : undefined,
                                 color: isCompleted ? 'white' : undefined,
                                 borderColor: isCompleted ? habit.color : '#e5e7eb'
                               }}
@@ -1021,15 +1079,15 @@ export default function HabitTracker() {
 
             <div className="mb-6">
               <label className="block text-sm font-bold text-gray-700 mb-3">Hours of Sleep</label>
-              <input 
-                type="number" 
-                step="0.5" 
-                min="0" 
-                max="24" 
-                value={sleepHours} 
-                onChange={(e) => setSleepHours(e.target.value)} 
-                className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg font-semibold transition-all duration-200" 
-                placeholder="e.g., 7.5" 
+              <input
+                type="number"
+                step="0.5"
+                min="0"
+                max="24"
+                value={sleepHours}
+                onChange={(e) => setSleepHours(e.target.value)}
+                className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg font-semibold transition-all duration-200"
+                placeholder="e.g., 7.5"
               />
             </div>
 
@@ -1037,14 +1095,13 @@ export default function HabitTracker() {
               <label className="block text-sm font-bold text-gray-700 mb-3">Sleep Quality (1-5)</label>
               <div className="grid grid-cols-5 gap-3">
                 {[1, 2, 3, 4, 5].map(rating => (
-                  <button 
-                    key={rating} 
-                    onClick={() => setSleepQuality(rating)} 
-                    className={`py-4 rounded-xl border-2 transition-all duration-200 font-bold text-lg hover:scale-105 ${
-                      sleepQuality === rating 
-                        ? 'border-blue-600 bg-gradient-to-br from-blue-500 to-cyan-500 text-white shadow-lg scale-105' 
+                  <button
+                    key={rating}
+                    onClick={() => setSleepQuality(rating)}
+                    className={`py-4 rounded-xl border-2 transition-all duration-200 font-bold text-lg hover:scale-105 ${sleepQuality === rating
+                        ? 'border-blue-600 bg-gradient-to-br from-blue-500 to-cyan-500 text-white shadow-lg scale-105'
                         : 'border-gray-200 hover:border-blue-300 bg-white text-gray-600'
-                    }`}
+                      }`}
                   >
                     {rating}
                   </button>
@@ -1078,13 +1135,13 @@ export default function HabitTracker() {
             <p className="text-sm text-gray-600 mb-6 leading-relaxed">Start quickly with a username — or sign in with Google to sync your progress across devices.</p>
 
             <div className="space-y-4 mb-4">
-              <input 
-                type="text" 
-                placeholder="username or email" 
-                value={userId} 
-                onChange={(e) => setUserId(e.target.value)} 
-                className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-medium transition-all duration-200" 
-                onKeyDown={(e) => e.key === 'Enter' && handleLoginModalConfirm(userId)} 
+              <input
+                type="text"
+                placeholder="username or email"
+                value={userId}
+                onChange={(e) => setUserId(e.target.value)}
+                className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent font-medium transition-all duration-200"
+                onKeyDown={(e) => e.key === 'Enter' && handleLoginModalConfirm(userId)}
               />
 
               <div className="flex gap-3">
@@ -1093,10 +1150,10 @@ export default function HabitTracker() {
                 </button>
                 <a href="https://api-logdaily-com.onrender.com/auth/google" className="flex-1 inline-flex items-center justify-center gap-3 px-6 py-3 rounded-xl border-2 border-gray-200 bg-white hover:border-gray-300 hover:shadow-lg transition-all duration-200 font-semibold">
                   <svg className="w-5 h-5" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.5h147.2c-6.4 34.6-25.5 64-54.3 83.7v69.7h87.7c51.2-47.2 81.9-116.5 81.9-198.5z" fill="#4285F4"/>
-                    <path d="M272 544.3c73.8 0 135.7-24.4 181-66.4l-87.7-69.7c-24.4 16.3-55.5 26-93.3 26-71.7 0-132.5-48.4-154.3-113.6H27.5v71.6C72.2 483 163.4 544.3 272 544.3z" fill="#34A853"/>
-                    <path d="M117.7 326.2c-10.3-30.8-10.3-64 0-94.8V159.8H27.5c-39.8 79.4-39.8 173.5 0 252.9l90.2-86.5z" fill="#FBBC05"/>
-                    <path d="M272 107.7c39 0 74 13.4 101.6 39.6l76.2-76.1C407.7 25.8 345.8 0 272 0 163.4 0 72.2 61.3 27.5 159.8l90.2 71.6C139.5 156.1 200.3 107.7 272 107.7z" fill="#EA4335"/>
+                    <path d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.5h147.2c-6.4 34.6-25.5 64-54.3 83.7v69.7h87.7c51.2-47.2 81.9-116.5 81.9-198.5z" fill="#4285F4" />
+                    <path d="M272 544.3c73.8 0 135.7-24.4 181-66.4l-87.7-69.7c-24.4 16.3-55.5 26-93.3 26-71.7 0-132.5-48.4-154.3-113.6H27.5v71.6C72.2 483 163.4 544.3 272 544.3z" fill="#34A853" />
+                    <path d="M117.7 326.2c-10.3-30.8-10.3-64 0-94.8V159.8H27.5c-39.8 79.4-39.8 173.5 0 252.9l90.2-86.5z" fill="#FBBC05" />
+                    <path d="M272 107.7c39 0 74 13.4 101.6 39.6l76.2-76.1C407.7 25.8 345.8 0 272 0 163.4 0 72.2 61.3 27.5 159.8l90.2 71.6C139.5 156.1 200.3 107.7 272 107.7z" fill="#EA4335" />
                   </svg>
                   <span>Google</span>
                 </a>
