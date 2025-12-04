@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Calendar, TrendingUp, Award, Plus, X, Check, Moon,
   BarChart3, User, LogIn, LogOut, Info, Menu, Sparkles
@@ -40,9 +40,14 @@ if (typeof window !== 'undefined' && !window.storage) {
 }
 
 /* ---------------------------
-  HabitTracker Component with Enhanced UI
+  HABIT TRACKER COMPONENT
+  - Optimistic UI + local queue + periodic flush
+  - Sends diffs for single-entry updates
 ----------------------------*/
 export default function HabitTracker() {
+  const SYNC_QUEUE_KEY = 'ld_sync_queue_v1'; // localStorage key for queued diffs
+  const SYNC_INTERVAL_MS = 15000; // flush every 15s
+
   const [userId, setUserId] = useState('');
   const [username, setUserName] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -76,6 +81,18 @@ export default function HabitTracker() {
   const toastHideTimers = React.useRef({ fadeTimer: null, hideTimer: null });
 
   const colors = ['#6366f1', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#f97316'];
+
+  // avoid auto-saving immediately after load
+  const initialLoadRef = useRef(true);
+  // debounce timer for saving habitsDefs
+  const habitsSaveTimer = useRef(null);
+
+  // queue in memory mirror of localStorage queue
+  const queueRef = useRef([]);
+  // lock to prevent concurrent flush
+  const flushingRef = useRef(false);
+  // interval id
+  const syncIntervalRef = useRef(null);
 
   /* ---------------------------
     Token capture from OAuth redirect
@@ -130,8 +147,12 @@ export default function HabitTracker() {
           console.error('Failed to fetch user data', err);
           setAuthToken(null);
           setIsLoggedIn(false);
+        } finally {
+          initialLoadRef.current = false;
         }
       })();
+    } else {
+      initialLoadRef.current = false;
     }
   }, []);
 
@@ -187,11 +208,158 @@ export default function HabitTracker() {
     if (isLoggedIn && userId) loadUserData();
   }, [isLoggedIn, userId]);
 
+  // === IMPORTANT CHANGE:
+  // - Do NOT auto-save the entire `entries` array on every change.
+  // - Only auto-save `habitsDefs` (debounced) here.
+  // - Entry-level saves should call saveEntryToServer(entry) directly (already done where entries are modified).
   useEffect(() => {
-    if (isLoggedIn && userId) {
-      saveUserData();
+    if (!isLoggedIn) return;
+    // avoid saving immediately during initial load
+    if (initialLoadRef.current) return;
+
+    // debounce saving habitsDefs to avoid spamming server while user types/chooses color
+    if (habitsSaveTimer.current) clearTimeout(habitsSaveTimer.current);
+    habitsSaveTimer.current = setTimeout(async () => {
+      try {
+        await authFetch('/api/user/data', {
+          method: 'POST',
+          body: JSON.stringify({ habits: habitsDefs })
+        });
+        showSaveStatus('✓ Saved', 'success');
+      } catch (err) {
+        console.error('Error saving habits', err);
+        showSaveStatus('⚠ Save failed', 'error');
+      }
+    }, 400);
+
+    return () => {
+      if (habitsSaveTimer.current) {
+        clearTimeout(habitsSaveTimer.current);
+        habitsSaveTimer.current = null;
+      }
+    };
+  }, [habitsDefs, isLoggedIn]);
+
+
+  /* ---------------------------
+    SYNC QUEUE UTILITIES (localStorage-backed)
+  ----------------------------*/
+
+  // load queue from localStorage into queueRef
+  const loadQueueFromStorage = () => {
+    try {
+      const raw = localStorage.getItem(SYNC_QUEUE_KEY);
+      if (!raw) {
+        queueRef.current = [];
+        return [];
+      }
+      const parsed = JSON.parse(raw);
+      queueRef.current = Array.isArray(parsed) ? parsed : [];
+      return queueRef.current;
+    } catch (e) {
+      console.error('Failed to load sync queue from storage', e);
+      queueRef.current = [];
+      return [];
     }
-  }, [entries, habitsDefs]);
+  };
+
+  const persistQueueToStorage = () => {
+    try {
+      localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(queueRef.current));
+    } catch (e) {
+      console.error('Failed to persist sync queue', e);
+    }
+  };
+
+  // enqueue a minimal payload (diff) for a single-date update
+  const enqueueEntryDiff = (payload) => {
+    // payload must contain { date, ... } and only the fields that changed (completedHabits and/or sleep)
+    const minimal = { date: payload.date };
+    if (Object.prototype.hasOwnProperty.call(payload, 'completedHabits')) minimal.completedHabits = payload.completedHabits;
+    if (Object.prototype.hasOwnProperty.call(payload, 'sleep')) minimal.sleep = payload.sleep;
+    minimal.clientGeneratedAt = new Date().toISOString();
+
+    queueRef.current.push(minimal);
+    persistQueueToStorage();
+    console.log('Queue ENQUEUED:', minimal, 'queueLen=', queueRef.current.length);
+  };
+
+  // attempt to flush the queue sequentially (one-by-one)
+  const flushQueue = async () => {
+    if (!isLoggedIn) {
+      console.log('flushQueue: user not logged in — skipping');
+      return;
+    }
+    if (flushingRef.current) {
+      // already flushing
+      return;
+    }
+    loadQueueFromStorage(); // ensure up-to-date
+    if (!queueRef.current.length) return;
+
+    flushingRef.current = true;
+    console.log('flushQueue: starting — items=', queueRef.current.length);
+
+    // process queue sequentially
+    while (queueRef.current.length) {
+      const item = queueRef.current[0];
+      try {
+        // send only the diff
+        const resp = await authFetch('/api/user/data', {
+          method: 'POST',
+          body: JSON.stringify(item)
+        });
+        // if authFetch didn't throw, assume success
+        console.log('flushQueue: synced item', item.date);
+        // remove first item and persist
+        queueRef.current.shift();
+        persistQueueToStorage();
+      } catch (err) {
+        // stop processing if network/auth fails — will retry later
+        console.error('flushQueue: failed to sync item', queueRef.current[0], err);
+        break;
+      }
+    }
+
+    flushingRef.current = false;
+    console.log('flushQueue: finished — remaining=', queueRef.current.length);
+  };
+
+  // helper to schedule a flush (immediate but throttled) and also ensures queue persisted
+  const scheduleFlush = (delay = 0) => {
+    setTimeout(() => flushQueue(), delay);
+  };
+
+  // start periodic flushing when mounted & logged in
+  useEffect(() => {
+    // clear any existing interval
+    if (syncIntervalRef.current) {
+      clearInterval(syncIntervalRef.current);
+      syncIntervalRef.current = null;
+    }
+
+    if (isLoggedIn) {
+      // load queue into memory
+      loadQueueFromStorage();
+      // attempt an immediate flush
+      scheduleFlush(300);
+      // then start periodic flushing
+      syncIntervalRef.current = setInterval(() => {
+        flushQueue();
+      }, SYNC_INTERVAL_MS);
+    } else {
+      // not logged in — keep queue in storage, but do not flush
+      loadQueueFromStorage();
+    }
+
+    return () => {
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+        syncIntervalRef.current = null;
+      }
+    };
+  }, [isLoggedIn, userId]);
+
 
   /* ---------------------------
     Data operations
@@ -203,6 +371,8 @@ export default function HabitTracker() {
       setEntries(data.entries || []);
       setTodayEntry(data.todayEntry || { date: getTodayString(), completedHabits: [], sleep: { hours: null, quality: null } });
       showSaveStatus('✓ Data loaded', 'success');
+      // after loading, try to flush any queued diffs
+      scheduleFlush(200);
     } catch (err) {
       console.error('Error loading data:', err);
       showSaveStatus('⚠ Load failed', 'error');
@@ -222,21 +392,34 @@ export default function HabitTracker() {
     }
   };
 
+  // IMPORTANT: frontend will not send the whole entries array for single updates anymore.
+  // Instead we enqueue a diff and flushQueue will sync to server.
   const saveEntryToServer = async (entry) => {
     try {
-      await authFetch('/api/user/data', {
-        method: 'POST',
-        body: JSON.stringify({
-          date: entry.date,
-          completedHabits: entry.completedHabits,
-          sleep: entry.sleep,
-          habits: habitsDefs
-        })
-      });
+      // Build payload
+      const payload = { date: entry.date };
+
+      // Pass the atomic diff if present
+      if (entry.habitDiff) {
+        payload.habitDiff = entry.habitDiff; 
+      }
+      // Or pass full list (only if doing bulk operations, not toggles)
+      else if (entry.completedHabits !== undefined) {
+        payload.completedHabits = entry.completedHabits;
+      }
+
+      // Pass sleep if present
+      if (entry.sleep !== undefined) {
+        payload.sleep = entry.sleep;
+      }
+
+      // Optimistic local enqueue
+      enqueueEntryDiff(payload);
+      scheduleFlush(50);
       showSaveStatus('✓ Saved', 'success');
     } catch (err) {
-      console.error('Save failed', err);
-      showSaveStatus('⚠ Save failed', 'error');
+      console.error('Save failed (queued)', err);
+      showSaveStatus('⚠ Save queued', 'error');
     }
   };
 
@@ -336,10 +519,12 @@ export default function HabitTracker() {
     if (todayEntry && todayEntry.completedHabits.includes(habitId)) {
       const updatedToday = { ...todayEntry, completedHabits: todayEntry.completedHabits.filter(id => id !== habitId) };
       setTodayEntry(updatedToday);
-      await saveEntryToServer(updatedToday);
+      // enqueue diff
+      saveEntryToServer(updatedToday);
     }
 
     try {
+      // We still send both updated habits and entries: habits is replace; entries will be treated as upserts by the server
       await authFetch('/api/user/data', {
         method: 'POST',
         body: JSON.stringify({ habits: updatedDefs, entries: updatedEntries })
@@ -353,11 +538,15 @@ export default function HabitTracker() {
 
   const toggleHabit = (habitId) => {
     const today = getTodayString();
+    
+    // Ensure todayEntry is initialized for today
     if (todayEntry.date !== today) {
       setTodayEntry({ date: today, completedHabits: [], sleep: { hours: null, quality: null } });
     }
 
     const isCompleted = (todayEntry.completedHabits || []).includes(habitId);
+    
+    // Calculate new local state (for UI)
     const newCompleted = isCompleted
       ? todayEntry.completedHabits.filter(id => id !== habitId)
       : [...(todayEntry.completedHabits || []), habitId];
@@ -370,7 +559,15 @@ export default function HabitTracker() {
       return [...filtered, updated];
     });
 
-    saveEntryToServer(updated);
+    // --- KEY CHANGE HERE ---
+    // Instead of sending the full list, send the Atomic Diff
+    saveEntryToServer({ 
+      date: updated.date, 
+      habitDiff: { 
+        id: habitId, 
+        type: isCompleted ? 'remove' : 'add' // If it WAS completed, we are removing it, and vice versa
+      } 
+    });
   };
 
   /* ---------------------------
@@ -392,7 +589,8 @@ export default function HabitTracker() {
     setSleepHours('');
     setSleepQuality(3);
     setShowSleepModal(false);
-    saveEntryToServer(updated);
+    // Persist as diff
+    saveEntryToServer({ date: updated.date, sleep: updated.sleep });
   };
 
   /* ---------------------------
@@ -515,7 +713,10 @@ export default function HabitTracker() {
 
   /* ---------------------------
     JSX Render
+    (kept exactly as you provided - truncated below for brevity in this message,
+     but in your file keep the entire JSX you already have)
   ----------------------------*/
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50">
       {/* Dismissible Toast for Free Tier Notice - ADD THIS SECTION */}
