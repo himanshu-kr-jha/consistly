@@ -55,6 +55,14 @@ export default function HabitTracker() {
   });
 
   // UI State unchanged
+    // credits for local-only users (default 6)
+  const [credits, setCredits] = useState(6);
+
+  
+
+  // show when user is out of credits and tries to add/update
+  const [showOutOfCreditsModal, setShowOutOfCreditsModal] = useState(false);
+
   const [showAddHabit, setShowAddHabit] = useState(false);
   const [newHabitName, setNewHabitName] = useState('');
   const [selectedColor, setSelectedColor] = useState('#6366f1');
@@ -72,6 +80,17 @@ export default function HabitTracker() {
   const [actionToastType, setActionToastType] = useState('success');
   const [toastFading, setToastFading] = useState(false);
   const toastHideTimers = React.useRef({ fadeTimer: null, hideTimer: null });
+    // local-only username flow
+  const [isLocalOnly, setIsLocalOnly] = useState(false);
+  // Edit-habit modal state
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editHabitId, setEditHabitId] = useState(null);
+  const [editHabitName, setEditHabitName] = useState('');
+  const [editHabitColor, setEditHabitColor] = useState(selectedColor);
+
+  // prefix for localStorage keys for local-only users
+  const LOCAL_PREFIX = 'ld_local_user_'; // full key: ld_local_user_<username>
+
 
   const colors = ['#6366f1', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#f97316'];
 
@@ -190,6 +209,16 @@ export default function HabitTracker() {
     };
   }, [isLoggedIn]);
 
+    // Persist to localStorage automatically for username-only users (and save credits)
+  useEffect(() => {
+    if (!isLocalOnly || !userId) return;
+    // Save a minimal snapshot whenever habits/entries/todayEntry/credits change
+    saveLocalUserData(userId, { habits: habitsDefs, entries, todayEntry, credits });
+    // friendly feedback (only when change is user-initiated)
+    showSaveStatus('✓ Changes saved locally', 'success');
+  }, [isLocalOnly, userId, habitsDefs, entries, todayEntry, credits]);
+
+
   // IMPORTANT: only save habitsDefs (debounced). Entry updates are atomic diffs.
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -215,6 +244,88 @@ export default function HabitTracker() {
       }
     };
   }, [habitsDefs, isLoggedIn]);
+
+
+    // Local storage helpers for username-only users
+  const localKeyFor = (username) => `${LOCAL_PREFIX}${encodeURIComponent(username)}`;
+
+    const loadLocalUserData = (username) => {
+    try {
+      const key = localKeyFor(username);
+      const raw = localStorage.getItem(key);
+      if (!raw) {
+        // return sensible defaults
+        return {
+          habits: [],
+          entries: [],
+          todayEntry: { date: getTodayString(), completedHabits: [], sleep: { hours: null, quality: null } },
+          credits: 3
+        };
+      }
+      const parsed = JSON.parse(raw);
+      return {
+        habits: Array.isArray(parsed.habits) ? parsed.habits : [],
+        entries: Array.isArray(parsed.entries) ? parsed.entries : [],
+        todayEntry: parsed.todayEntry || { date: getTodayString(), completedHabits: [], sleep: { hours: null, quality: null } },
+        credits: typeof parsed.credits === 'number' ? parsed.credits : 6
+      };
+    } catch (err) {
+      console.error('loadLocalUserData error', err);
+      return {
+        habits: [],
+        entries: [],
+        todayEntry: { date: getTodayString(), completedHabits: [], sleep: { hours: null, quality: null } },
+        credits: 6
+      };
+    }
+  };
+
+  const saveLocalUserData = (username, { habits, entries, todayEntry, credits: cred }) => {
+    try {
+      const key = localKeyFor(username);
+      const payload = {
+        habits: habits || [],
+        entries: entries || [],
+        todayEntry: todayEntry || { date: getTodayString(), completedHabits: [], sleep: { hours: null, quality: null } },
+        credits: typeof cred === 'number' ? cred : (typeof credits === 'number' ? credits : 6),
+        clientSavedAt: new Date().toISOString()
+      };
+      localStorage.setItem(key, JSON.stringify(payload));
+    } catch (err) {
+      console.error('saveLocalUserData error', err);
+    }
+  };
+
+
+    const handleLoginModalConfirm = (id) => {
+    if (id && id.trim()) {
+      const uname = id.trim();
+      setUserId(uname);
+      setIsLoggedIn(true);
+
+      // If there is NOT an auth token, treat this as a local-only user
+      // (username-only "Get started" flow).
+      const existingToken = getAuthToken();
+      if (!existingToken) {
+        setIsLocalOnly(true);
+        // load user data from localStorage based on username
+        const local = loadLocalUserData(uname);
+        setHabitsDefs(local.habits || []);
+        setEntries(local.entries || []);
+        setTodayEntry(local.todayEntry || { date: getTodayString(), completedHabits: [], sleep: { hours: null, quality: null } });
+        setCredits(typeof local.credits === 'number' ? local.credits : 6);
+        showSaveStatus('✓ Loaded local profile', 'success');
+        setShowLoginModal(false);
+        initialLoadRef.current = false;
+        return;
+      }
+
+      // otherwise proceed with server-backed user flow
+      setIsLocalOnly(false);
+      setShowLoginModal(false);
+    }
+  };
+
 
   /* ---------------------------
     SYNC QUEUE UTILITIES (unchanged logic)
@@ -321,13 +432,48 @@ export default function HabitTracker() {
     setTimeout(() => flushQueue(), delay);
   };
 
-  const saveEntryToServer = async (entry) => {
+    const saveEntryToServer = async (entry) => {
     try {
       const payload = { date: entry.date };
       if (entry.completedHabits !== undefined) payload.completedHabits = entry.completedHabits;
       if (entry.sleep !== undefined) payload.sleep = entry.sleep;
       if (entry.habitDiff !== undefined) payload.habitDiff = entry.habitDiff;
 
+      // if local-only user -> persist immediately to localStorage and avoid network queue
+      if (isLocalOnly && userId) {
+        // apply habitDiff if provided to the local entries/todayEntry
+        const today = entry.date;
+        let updatedEntry = entries.find(e => e.date === today) || (todayEntry && todayEntry.date === today ? todayEntry : { date: today, completedHabits: [], sleep: { hours: null, quality: null } });
+
+        if (payload.habitDiff) {
+          const { id, type } = payload.habitDiff;
+          if (type === 'add') {
+            updatedEntry.completedHabits = Array.from(new Set([...(updatedEntry.completedHabits || []), id]));
+          } else if (type === 'remove') {
+            updatedEntry.completedHabits = (updatedEntry.completedHabits || []).filter(x => x !== id);
+          }
+        }
+        if (payload.completedHabits !== undefined) {
+          updatedEntry.completedHabits = payload.completedHabits;
+        }
+        if (payload.sleep !== undefined) {
+          updatedEntry.sleep = payload.sleep;
+        }
+
+        // update entries and todayEntry in local state
+        setTodayEntry(updatedEntry);
+        setEntries(prev => {
+          const filtered = prev.filter(e => e.date !== today);
+          return [...filtered, updatedEntry];
+        });
+
+        // persist full snapshot for username
+        saveLocalUserData(userId, { habits: habitsDefs, entries: (entries.filter(e => e.date !== today)).concat([updatedEntry]), todayEntry: updatedEntry });
+        showSaveStatus('✓ Saved (local)', 'success');
+        return;
+      }
+
+      // existing server flow for authenticated users:
       if (payload.completedHabits === undefined && payload.sleep === undefined && payload.habitDiff === undefined) {
         const localEntry = (entries.find(e => e.date === entry.date) || (todayEntry && todayEntry.date === entry.date ? todayEntry : null));
         if (localEntry) {
@@ -349,6 +495,7 @@ export default function HabitTracker() {
       showSaveStatus('⚠ Save queued', 'error');
     }
   };
+
 
   /* ---------------------------
     Data operations (updated to use /api/user/data-extended and /api/user/data)
@@ -460,13 +607,13 @@ export default function HabitTracker() {
   /* ---------------------------
     Auth helpers (update login URL usage)
   ----------------------------*/
-  const handleLoginModalConfirm = (id) => {
-    if (id && id.trim()) {
-      setUserId(id.trim());
-      setIsLoggedIn(true);
-      setShowLoginModal(false);
-    }
-  };
+  // const handleLoginModalConfirm = (id) => {
+  //   if (id && id.trim()) {
+  //     setUserId(id.trim());
+  //     setIsLoggedIn(true);
+  //     setShowLoginModal(false);
+  //   }
+  // };
   const handleLogout = () => {
     setAuthToken(null);
     setIsLoggedIn(false);
@@ -502,20 +649,87 @@ export default function HabitTracker() {
     setShowAddHabit(false);
 
     // Create on server via POST /api/habits
-    try {
-      const payload = { habitId: id, name: newDef.name, color: newDef.color };
-      const resp = await authFetch('/api/habits', {
-        method: 'POST',
-        body: JSON.stringify(payload)
-      });
-      // On success refresh authoritative habit list
-      await refreshHabitsFromServer();
-      showSaveStatus('✓ Habit added', 'success');
+            try {
+      if (isLocalOnly) {
+        // check credits
+        if (typeof credits !== 'number' || credits <= 0) {
+          // no credits — show upgrade popup
+          setShowOutOfCreditsModal(true);
+          // revert optimistic UI change
+          setHabitsDefs(prev => prev.filter(h => h.id !== id));
+          return;
+        }
+
+        // deduct a credit (optimistic)
+        setCredits(prev => {
+          const next = (typeof prev === 'number' ? prev : 6) - 1;
+          // persist after state update by using next
+          saveLocalUserData(userId, { habits: [...(habitsDefs || []), newDef], entries, todayEntry, credits: next });
+          return next;
+        });
+
+        showSaveStatus('✓ Habit added (local)', 'success');
+      } else {
+        const payload = { habitId: id, name: newDef.name, color: newDef.color };
+        const resp = await authFetch('/api/habits', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+        await refreshHabitsFromServer();
+        showSaveStatus('✓ Habit added', 'success');
+      }
     } catch (err) {
-      console.error('Failed to create habit on server', err);
-      // Revert optimistic add if you want:
+      console.error('Failed to create habit', err);
       setHabitsDefs(prev => prev.filter(h => h.id !== id));
       showSaveStatus('⚠ Save failed', 'error');
+    }
+  };
+
+    const openEditHabit = (habit) => {
+    setEditHabitId(habit.id);
+    setEditHabitName(habit.name);
+    setEditHabitColor(habit.color || selectedColor);
+    setShowEditModal(true);
+  };
+
+  const saveEditHabit = async () => {
+    if (!editHabitId) return;
+
+    // local-only credit check
+    if (isLocalOnly) {
+      if (typeof credits !== 'number' || credits <= 0) {
+        setShowOutOfCreditsModal(true);
+        return;
+      }
+      // deduct credit
+      setCredits(prev => {
+        const next = (typeof prev === 'number' ? prev : 6) - 1;
+        // update and persist
+        setHabitsDefs(prevDefs => {
+          const updated = prevDefs.map(h => h.id === editHabitId ? { ...h, name: editHabitName, color: editHabitColor } : h);
+          saveLocalUserData(userId, { habits: updated, entries, todayEntry, credits: next });
+          return updated;
+        });
+        return next;
+      });
+      showSaveStatus('✓ Habit updated (local)', 'success');
+      setShowEditModal(false);
+      return;
+    }
+
+    // server user: call update endpoint if available (or do optimistic local change + refresh)
+    try {
+      // if your server has an endpoint like /api/habits/:id (PATCH), use it:
+      await authFetch(`/api/habits/${editHabitId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: editHabitName, color: editHabitColor })
+      });
+      await refreshHabitsFromServer();
+      showSaveStatus('✓ Habit updated', 'success');
+      setShowEditModal(false);
+    } catch (err) {
+      console.error('Failed to update habit on server', err);
+      showSaveStatus('⚠ Update failed', 'error');
     }
   };
 
@@ -558,17 +772,27 @@ export default function HabitTracker() {
       saveEntryToServer(updatedToday);
     }
 
-    try {
-      await authFetch(`/api/habits/${habitId}`, { method: 'DELETE' });
-      // Refresh authoritative habits
-      await refreshHabitsFromServer();
-      showSaveStatus('✓ Habit removed', 'success');
+        try {
+      if (isLocalOnly) {
+        // already removed from local state; persist
+        saveLocalUserData(userId, { habits: updatedDefs, entries: updatedEntries, todayEntry: todayEntry });
+        showSaveStatus('✓ Habit removed (local)', 'success');
+      } else {
+        await authFetch(`/api/habits/${habitId}`, { method: 'DELETE' });
+        await refreshHabitsFromServer();
+        showSaveStatus('✓ Habit removed', 'success');
+      }
     } catch (err) {
-      console.error('Failed to delete habit on server', err);
-      // On failure, refresh to restore authoritative view
-      await refreshHabitsFromServer();
+      console.error('Failed to delete habit', err);
+      if (isLocalOnly) {
+        // best-effort: still persist to local storage
+        saveLocalUserData(userId, { habits: updatedDefs, entries: updatedEntries, todayEntry: todayEntry });
+      } else {
+        await refreshHabitsFromServer();
+      }
       showSaveStatus('⚠ Delete failed', 'error');
     }
+
   };
 
   const toggleHabit = (habitId) => {
@@ -861,10 +1085,16 @@ export default function HabitTracker() {
                 </div>
               ) : (
                 <div className="flex items-center gap-3 ml-2">
-                  <div className="px-4 py-2 rounded-lg bg-gradient-to-r from-gray-50 to-gray-100 border border-gray-200 text-sm flex items-center gap-2 shadow-sm">
-                    <User className="w-4 h-4 text-gray-600" />
-                    <span className="truncate max-w-[8rem] font-medium text-gray-700">{userId}</span>
-                  </div>
+                  <div className="px-4 py-2 rounded-lg bg-gradient-to-r from-gray-50 to-gray-100 border border-gray-200 text-sm flex items-center gap-3 shadow-sm">
+  <User className="w-4 h-4 text-gray-600" />
+  <span className="truncate max-w-[8rem] font-medium text-gray-700">{userId}</span>
+  {isLocalOnly && (
+    <span className="ml-2 px-2 py-1 text-xs rounded bg-yellow-50 border border-yellow-200 text-yellow-700 font-semibold">
+      {credits} credits
+    </span>
+  )}
+</div>
+
                   <button onClick={handleLogout} className="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm font-medium flex items-center gap-2 transition-all duration-200">
                     <LogOut className="w-4 h-4" />
                     Logout
@@ -1281,9 +1511,20 @@ export default function HabitTracker() {
                             {calculateStreakFromEntries(habit.id)} <span className="text-lg">🔥</span>
                           </span>
                         </div>
-                        <button onClick={() => deleteHabit(habit.id)} className="text-gray-400 hover:text-red-500 hover:scale-110 transition-all duration-200 ml-3">
-                          <X className="w-6 h-6" />
-                        </button>
+                        <div className="flex items-center gap-2 ml-3">
+  <button
+    onClick={() => openEditHabit(habit)}
+    className="text-gray-500 hover:text-indigo-600 hover:scale-110 transition-all duration-200 p-1 rounded"
+    title="Edit habit (costs 1 credit for local users)"
+  >
+    ✎
+  </button>
+
+  <button onClick={() => deleteHabit(habit.id)} className="text-gray-400 hover:text-red-500 hover:scale-110 transition-all duration-200 p-1 rounded">
+    <X className="w-6 h-6" />
+  </button>
+</div>
+
                       </div>
 
                       <div className="grid grid-cols-7 gap-2">
@@ -1406,6 +1647,64 @@ export default function HabitTracker() {
               </button>
               <button onClick={() => { setShowSleepModal(false); setSleepHours(''); setSleepQuality(3); }} className="flex-1 bg-gray-200 text-gray-700 px-6 py-4 rounded-xl font-bold hover:bg-gray-300 transition-all duration-200">
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+            {/* Edit Habit Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-70 p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold">Edit Habit (costs 1 credit)</h3>
+              <button onClick={() => setShowEditModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <input className="w-full px-4 py-3 border rounded-xl mb-3" value={editHabitName} onChange={(e) => setEditHabitName(e.target.value)} />
+            <div className="flex items-center gap-3 mb-4">
+              <span className="text-sm font-medium">Color:</span>
+              {colors.map(c => (
+                <button key={c} onClick={() => setEditHabitColor(c)} className={`w-8 h-8 rounded-lg ${editHabitColor === c ? 'ring-2 ring-indigo-400' : ''}`} style={{ backgroundColor: c }} />
+              ))}
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={saveEditHabit} className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-4 py-3 rounded-xl font-semibold">
+                Save & Use 1 credit
+              </button>
+              <button onClick={() => setShowEditModal(false)} className="flex-1 bg-gray-100 px-4 py-3 rounded-xl font-semibold">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Out-of-credits Modal */}
+      {showOutOfCreditsModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-80 p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl text-center">
+            <h3 className="text-lg font-bold mb-3">You're out of credits</h3>
+            <p className="text-sm text-gray-600 mb-6">Local users have a 6-credit trial for habit add/update. To unlock unlimited habit creation, please sign in with Google.</p>
+            <div className="flex gap-3">
+              <button
+                    onClick={() => window.location.href = `${BACKEND_URL}/auth/google`}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium hover:shadow-md hover:border-gray-300 transition-all duration-200"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.5h147.2c-6.4 34.6-25.5 64-54.3 83.7v69.7h87.7c51.2-47.2 81.9-116.5 81.9-198.5z" fill="#4285F4" />
+                      <path d="M272 544.3c73.8 0 135.7-24.4 181-66.4l-87.7-69.7c-24.4 16.3-55.5 26-93.3 26-71.7 0-132.5-48.4-154.3-113.6H27.5v71.6C72.2 483 163.4 544.3 272 544.3z" fill="#34A853" />
+                      <path d="M117.7 326.2c-10.3-30.8-10.3-64 0-94.8V159.8H27.5c-39.8 79.4-39.8 173.5 0 252.9l90.2-86.5z" fill="#FBBC05" />
+                      <path d="M272 107.7c39 0 74 13.4 101.6 39.6l76.2-76.1C407.7 25.8 345.8 0 272 0 163.4 0 72.2 61.3 27.5 159.8l90.2 71.6C139.5 156.1 200.3 107.7 272 107.7z" fill="#EA4335" />
+                    </svg>
+                    <span className="hidden lg:inline">Sign in</span>
+                  </button>
+
+              <button onClick={() => setShowOutOfCreditsModal(false)} className="flex-1 bg-gray-100 px-4 py-3 rounded-xl font-semibold">
+                Maybe later
               </button>
             </div>
           </div>
