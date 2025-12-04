@@ -2,13 +2,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Calendar, TrendingUp, Award, Plus, X, Check, Moon,
-  BarChart3, User, LogIn, LogOut, Info, Menu, Sparkles
+  BarChart3, User, LogIn, LogOut, Info, Menu, Sparkles,Pin,
 } from 'lucide-react';
 import {
   LineChart as RechartsLine, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 import { setAuthToken, getAuthToken, authFetch } from './api';
+import StickyNote from './StickyNotes';
 
 // Toast JSX (place at the top of your return/render)
 // localStorage polyfill (unchanged)
@@ -56,10 +57,11 @@ export default function HabitTracker() {
 
   // UI State unchanged
     // credits for local-only users (default 6)
-  const [credits, setCredits] = useState(6);
+  const [credits, setCredits] = useState(3);
+
+  const STICKY_KEY = 'ld_sticky_note_v1';
 
   
-
   // show when user is out of credits and tries to add/update
   const [showOutOfCreditsModal, setShowOutOfCreditsModal] = useState(false);
 
@@ -964,12 +966,16 @@ export default function HabitTracker() {
   const chartHeight = isMobile ? 200 : 280;
   const smallChartHeight = isMobile ? 160 : 220;
 
+
   /* ---------------------------
     JSX Render (kept mostly unchanged; auth links updated to use BACKEND_URL)
   ----------------------------*/
-
+  
   return (
+    
+  
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50">
+      <StickyNote userId={userId} isLoggedIn={isLoggedIn} corner="bottom-right" />
       {/* Dismissible Toast for Free Tier Notice */}
       {showToast && (
         <div
@@ -1209,7 +1215,13 @@ export default function HabitTracker() {
                     { title: 'Daily Habit Tracking', desc: 'Mark days and build streaks', icon: Calendar, color: 'from-blue-500 to-cyan-500' },
                     { title: 'Sleep Logging', desc: 'Hours & quality tracking', icon: Moon, color: 'from-purple-500 to-pink-500' },
                     { title: '30-Day Insights', desc: 'Visualize trends', icon: TrendingUp, color: 'from-green-500 to-emerald-500' },
-                    { title: 'Future-proof', desc: 'Easy to expand', icon: Sparkles, color: 'from-orange-500 to-red-500' }
+                    {
+  title: 'Sticky Notes',
+  desc: 'Quick reminders anywhere on screen',
+  icon: Pin,          // or Pin if you're using that instead
+  color: 'from-yellow-400 to-orange-500'
+}
+
                   ].map((feature, idx) => (
                     <div key={idx} className="p-6 rounded-2xl bg-white shadow-lg border border-gray-100 hover:shadow-xl hover:scale-105 transition-all duration-300 group">
                       <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${feature.color} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300`}>
