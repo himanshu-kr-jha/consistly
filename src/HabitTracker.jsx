@@ -1073,7 +1073,7 @@ export default function HabitTracker() {
               {!isLoggedIn ? (
                 <div className="flex items-center gap-2 ml-2">
                   <button
-                    onClick={() => window.location.href = `https://${BACKEND_URL}/auth/google`}
+                    onClick={() => window.location.href = `${BACKEND_URL}/auth/google`}
                     className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium hover:shadow-md hover:border-gray-300 transition-all duration-200"
                   >
                     <svg className="w-4 h-4" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg">
@@ -1129,7 +1129,7 @@ export default function HabitTracker() {
               </button>
               {!isLoggedIn ? (
                 <>
-                  <button onClick={() => { window.location.href = `https://${BACKEND_URL}/auth/google`; }} className="text-left px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors">
+                  <button onClick={() => { window.location.href = `${BACKEND_URL}/auth/google`; }} className="text-left px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors">
                     Sign in with Google
                   </button>
                   <button onClick={() => { setShowLoginModal(true); setMobileMenuOpen(false); }} className="text-left px-4 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold">
@@ -1184,7 +1184,7 @@ export default function HabitTracker() {
                   </button>
 
                   <button
-                    onClick={() => window.location.href = `https://${BACKEND_URL}/auth/google`}
+                    onClick={() => window.location.href = `${BACKEND_URL}/auth/google`}
                     className="flex items-center gap-3 px-8 py-4 rounded-xl border-2 border-gray-200 bg-white hover:border-gray-300 hover:shadow-lg transition-all duration-200 font-semibold"
                   >
                     <svg className="w-5 h-5" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg">
@@ -1750,7 +1750,7 @@ export default function HabitTracker() {
                 <button onClick={() => handleLoginModalConfirm(userId)} className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl font-bold hover:from-indigo-700 hover:to-purple-700 shadow-lg hover:shadow-xl transition-all duration-200">
                   Continue
                 </button>
-                <a href="https://${BACKEND_URL}/auth/google" className="flex-1 inline-flex items-center justify-center gap-3 px-6 py-3 rounded-xl border-2 border-gray-200 bg-white hover:border-gray-300 hover:shadow-lg transition-all duration-200 font-semibold">
+                <a href={`${BACKEND_URL}/auth/google`} className="flex-1 inline-flex items-center justify-center gap-3 px-6 py-3 rounded-xl border-2 border-gray-200 bg-white hover:border-gray-300 hover:shadow-lg transition-all duration-200 font-semibold">
                   <svg className="w-5 h-5" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg">
                     <path d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.5h147.2c-6.4 34.6-25.5 64-54.3 83.7v69.7h87.7c51.2-47.2 81.9-116.5 81.9-198.5z" fill="#4285F4" />
                     <path d="M272 544.3c73.8 0 135.7-24.4 181-66.4l-87.7-69.7c-24.4 16.3-55.5 26-93.3 26-71.7 0-132.5-48.4-154.3-113.6H27.5v71.6C72.2 483 163.4 544.3 272 544.3z" fill="#34A853" />
