@@ -11,6 +11,8 @@ import {
 import { setAuthToken, getAuthToken, authFetch } from './api';
 import StickyNote from './StickyNotes';
 
+import newFeatures from './newfeatures';
+
 // Toast JSX (place at the top of your return/render)
 // localStorage polyfill (unchanged)
 if (typeof window !== 'undefined' && !window.storage) {
@@ -60,6 +62,10 @@ export default function HabitTracker() {
   const [credits, setCredits] = useState(3);
 
   const STICKY_KEY = 'ld_sticky_note_v1';
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
+
+const WHATS_NEW_VERSION = 'v1.2.0'; // Update this when you add new features
+const WHATS_NEW_KEY = 'ld_whats_new_seen';
 
 
   // show when user is out of credits and tries to add/update
@@ -130,6 +136,16 @@ const [currentTime, setCurrentTime] = useState(new Date());
     } catch (e) {
       // fallback: do nothing
     }
+    // Check if user has seen the latest "What's New"
+  try {
+    const seenVersion = localStorage.getItem(WHATS_NEW_KEY);
+    if (seenVersion !== WHATS_NEW_VERSION) {
+      // Show after a short delay so it doesn't conflict with other modals
+      setTimeout(() => setShowWhatsNew(true), 1500);
+    }
+  } catch (e) {
+    // fallback: do nothing
+  }
   }, []);
 
 
@@ -312,6 +328,14 @@ useEffect(() => {
     }
   };
 
+  const dismissWhatsNew = () => {
+  try {
+    localStorage.setItem(WHATS_NEW_KEY, WHATS_NEW_VERSION);
+    setShowWhatsNew(false);
+  } catch (e) {
+    setShowWhatsNew(false);
+  }
+};
   const loadLocalUserData = (username) => {
     try {
       const key = localKeyFor(username);
@@ -1187,6 +1211,10 @@ useEffect(() => {
               <button onClick={() => setShowVisualization(true)} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all duration-200">
                 Insights
               </button>
+              <button onClick={() => setShowWhatsNew(true)} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all duration-200 flex items-center gap-1">
+  <Sparkles className="w-4 h-4" />
+  What's New
+</button>
 
               {!isLoggedIn ? (
                 <div className="flex items-center gap-2 ml-2">
@@ -1245,6 +1273,10 @@ useEffect(() => {
               <button onClick={() => { setShowVisualization(true); setMobileMenuOpen(false); }} className="text-left px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors">
                 Insights
               </button>
+              <button onClick={() => { setShowWhatsNew(true); setMobileMenuOpen(false); }} className="text-left px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors flex items-center gap-2">
+  <Sparkles className="w-4 h-4" />
+  What's New
+</button>
               {!isLoggedIn ? (
                 <>
                   <button onClick={() => { window.location.href = `${BACKEND_URL}/auth/google`; }} className="text-left px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors">
@@ -1880,8 +1912,68 @@ useEffect(() => {
         </div>
       )}
 
-      {/* Login Modal */}
-      {showLoginModal && (
+      {/* What's New Modal */}
+{showWhatsNew && (
+  <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
+    <div className="bg-white rounded-3xl p-8 max-w-lg w-full shadow-2xl animate-in zoom-in-95 duration-300 max-h-[90vh] overflow-y-auto">
+      <div className="flex items-start justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500">
+            <Sparkles className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h3 className="text-2xl font-bold text-gray-900">What's New</h3>
+            <p className="text-sm text-gray-500 font-medium">{WHATS_NEW_VERSION}</p>
+          </div>
+        </div>
+        <button 
+          onClick={dismissWhatsNew} 
+          className="text-gray-400 hover:text-gray-600 hover:scale-110 transition-all duration-200"
+        >
+          <X className="w-6 h-6" />
+        </button>
+      </div>
+
+      
+      <div className="space-y-6">
+  {newFeatures.map((feature) => (
+    <div 
+      key={feature.id} 
+      className={`p-4 rounded-2xl bg-gradient-to-br ${feature.bgGradient} border ${feature.borderColor}`}
+    >
+      <div className="flex items-start gap-3">
+        <div className={`p-2 rounded-lg ${feature.iconBg} text-white flex-shrink-0 mt-1`}>
+          <feature.icon className="w-5 h-5" />
+        </div>
+        <div>
+          <h4 className="font-bold text-gray-900 mb-2">{feature.title}</h4>
+          <p className="text-sm text-gray-600 leading-relaxed">
+            {feature.description}
+          </p>
+        </div>
+      </div>
+    </div>
+  ))}
+</div>
+
+      <div className="mt-8 flex gap-3">
+        <button 
+          onClick={dismissWhatsNew}
+          className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl font-bold hover:from-indigo-700 hover:to-purple-700 shadow-lg hover:shadow-xl transition-all duration-200"
+        >
+          Got it! Let's go 🚀
+        </button>
+      </div>
+
+      <p className="text-xs text-gray-400 text-center mt-4">
+        You can always access this from the "What's New" menu
+      </p>
+    </div>
+  </div>
+)}
+
+{/* Login Modal */}
+{showLoginModal && (
         <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-60 p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl ring-1 ring-black/5 animate-in zoom-in-95 duration-300">
             <div className="flex items-center justify-between mb-6">
