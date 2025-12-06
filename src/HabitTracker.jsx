@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Calendar, TrendingUp, Award, Plus, X, Check, Moon,
-  BarChart3, User, LogIn, LogOut, Info, Menu, Sparkles,Pin,
+  BarChart3, User, LogIn, LogOut, Info, Menu, Sparkles, Pin,
 } from 'lucide-react';
 import {
   LineChart as RechartsLine, Line, BarChart, Bar,
@@ -56,12 +56,12 @@ export default function HabitTracker() {
   });
 
   // UI State unchanged
-    // credits for local-only users (default 6)
+  // credits for local-only users (default 6)
   const [credits, setCredits] = useState(3);
 
   const STICKY_KEY = 'ld_sticky_note_v1';
 
-  
+
   // show when user is out of credits and tries to add/update
   const [showOutOfCreditsModal, setShowOutOfCreditsModal] = useState(false);
 
@@ -82,7 +82,7 @@ export default function HabitTracker() {
   const [actionToastType, setActionToastType] = useState('success');
   const [toastFading, setToastFading] = useState(false);
   const toastHideTimers = React.useRef({ fadeTimer: null, hideTimer: null });
-    // local-only username flow
+  // local-only username flow
   const [isLocalOnly, setIsLocalOnly] = useState(false);
   // Edit-habit modal state
   const [showEditModal, setShowEditModal] = useState(false);
@@ -101,6 +101,37 @@ export default function HabitTracker() {
   const queueRef = useRef([]);
   const flushingRef = useRef(false);
   const syncIntervalRef = useRef(null);
+  // Timezone handling
+  const TZ_STORAGE_KEY = 'ld_tz_v1';
+  const detectedTz = (typeof Intl !== 'undefined' && Intl.DateTimeFormat) ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'UTC';
+  const [userTimezone, setUserTimezone] = useState(() => {
+    try {
+      const saved = localStorage.getItem(TZ_STORAGE_KEY);
+      return saved || detectedTz || 'UTC';
+    } catch (e) {
+      return detectedTz || 'UTC';
+    }
+  });
+  const [showTimezoneModal, setShowTimezoneModal] = useState(false);
+  // helpful flag so we show modal only when user hasn't explicitly chosen TZ
+  const tzConfirmedRef = useRef(false);
+const [currentTime, setCurrentTime] = useState(new Date());
+  
+
+  useEffect(() => {
+    // If user hasn't confirmed timezone before, show modal once on load
+    try {
+      const saved = localStorage.getItem(TZ_STORAGE_KEY);
+      if (!saved) {
+        setShowTimezoneModal(true);
+      } else {
+        tzConfirmedRef.current = true;
+      }
+    } catch (e) {
+      // fallback: do nothing
+    }
+  }, []);
+
 
   /* ---------------------------
     Token capture from OAuth redirect
@@ -192,10 +223,18 @@ export default function HabitTracker() {
   }, [showToast]);
 
   useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth < 640);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
+  const onResize = () => setIsMobile(window.innerWidth < 640);
+  window.addEventListener('resize', onResize);
+  return () => window.removeEventListener('resize', onResize);
+}, []);
+
+// Update clock every second
+useEffect(() => {
+  const timer = setInterval(() => {
+    setCurrentTime(new Date());
+  }, 1000);
+  return () => clearInterval(timer);
+}, []);
 
   useEffect(() => {
     if (isLoggedIn) loadUserData();
@@ -211,7 +250,7 @@ export default function HabitTracker() {
     };
   }, [isLoggedIn]);
 
-    // Persist to localStorage automatically for username-only users (and save credits)
+  // Persist to localStorage automatically for username-only users (and save credits)
   useEffect(() => {
     if (!isLocalOnly || !userId) return;
     // Save a minimal snapshot whenever habits/entries/todayEntry/credits change
@@ -247,11 +286,33 @@ export default function HabitTracker() {
     };
   }, [habitsDefs, isLoggedIn]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(TZ_STORAGE_KEY, userTimezone);
+    } catch (e) { /* ignore */ }
+    // re-calc today/todayEntry and chart data if necessary
+    // If entries are stored with plain 'YYYY-MM-DD' keys, they still match.
+    // Force a UI refresh by updating todayEntry from entries (prefer server's today entry if present)
+    const t = entries.find(e => e.date === getTodayString());
+    if (t) setTodayEntry(t);
+  }, [userTimezone]);
 
-    // Local storage helpers for username-only users
+  // Local storage helpers for username-only users
   const localKeyFor = (username) => `${LOCAL_PREFIX}${encodeURIComponent(username)}`;
+  const saveTimezone = (tz) => {
+    try {
+      localStorage.setItem(TZ_STORAGE_KEY, tz);
+      setUserTimezone(tz);
+      tzConfirmedRef.current = true;
+      setShowTimezoneModal(false);
+      showSaveStatus('✓ Timezone saved', 'success');
+    } catch (e) {
+      console.error('saveTimezone error', e);
+      showSaveStatus('⚠ Could not save timezone', 'error');
+    }
+  };
 
-    const loadLocalUserData = (username) => {
+  const loadLocalUserData = (username) => {
     try {
       const key = localKeyFor(username);
       const raw = localStorage.getItem(key);
@@ -299,7 +360,7 @@ export default function HabitTracker() {
   };
 
 
-    const handleLoginModalConfirm = (id) => {
+  const handleLoginModalConfirm = (id) => {
     if (id && id.trim()) {
       const uname = id.trim();
       setUserId(uname);
@@ -434,7 +495,7 @@ export default function HabitTracker() {
     setTimeout(() => flushQueue(), delay);
   };
 
-    const saveEntryToServer = async (entry) => {
+  const saveEntryToServer = async (entry) => {
     try {
       const payload = { date: entry.date };
       if (entry.completedHabits !== undefined) payload.completedHabits = entry.completedHabits;
@@ -629,9 +690,17 @@ export default function HabitTracker() {
   /* ---------------------------
     Date helpers (unchanged)
   ----------------------------*/
+    // Return ISO yyyy-mm-dd for current "day" in the selected timezone
   function getTodayString() {
-    return new Date().toISOString().split('T')[0];
+    try {
+      // 'en-CA' gives 'YYYY-MM-DD' in most engines
+      return new Intl.DateTimeFormat('en-CA', { timeZone: userTimezone }).format(new Date());
+    } catch (e) {
+      // fallback to local ISO
+      return new Date().toISOString().split('T')[0];
+    }
   }
+
 
   function isDateLocked(dateString) {
     return dateString !== getTodayString();
@@ -651,7 +720,7 @@ export default function HabitTracker() {
     setShowAddHabit(false);
 
     // Create on server via POST /api/habits
-            try {
+    try {
       if (isLocalOnly) {
         // check credits
         if (typeof credits !== 'number' || credits <= 0) {
@@ -687,7 +756,7 @@ export default function HabitTracker() {
     }
   };
 
-    const openEditHabit = (habit) => {
+  const openEditHabit = (habit) => {
     setEditHabitId(habit.id);
     setEditHabitName(habit.name);
     setEditHabitColor(habit.color || selectedColor);
@@ -774,7 +843,7 @@ export default function HabitTracker() {
       saveEntryToServer(updatedToday);
     }
 
-        try {
+    try {
       if (isLocalOnly) {
         // already removed from local state; persist
         saveLocalUserData(userId, { habits: updatedDefs, entries: updatedEntries, todayEntry: todayEntry });
@@ -852,28 +921,56 @@ export default function HabitTracker() {
   /* ---------------------------
     Analytics helpers (unchanged)
   ----------------------------*/
+    const buildBaseDateFromTodayString = (isoDateStr) => {
+    // isoDateStr is 'YYYY-MM-DD' -> create a Date at local midnight (safe canonical)
+    // using new Date(`${isoDateStr}T00:00:00`) is fine for our usage (we only need day increments)
+    return new Date(`${isoDateStr}T00:00:00`);
+  };
+
   const getLast7Days = () => {
     const days = [];
+    const baseIso = getTodayString(); // timezone-correct today
+    const base = buildBaseDateFromTodayString(baseIso);
     for (let i = 6; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      days.push(date);
+      const d = new Date(base);
+      d.setDate(base.getDate() - i);
+      days.push(d);
     }
     return days;
   };
 
   const getLast30Days = () => {
     const days = [];
+    const baseIso = getTodayString();
+    const base = buildBaseDateFromTodayString(baseIso);
     for (let i = 29; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      days.push(date);
+      const d = new Date(base);
+      d.setDate(base.getDate() - i);
+      days.push(d);
     }
     return days;
   };
 
-  const formatDate = (date) => date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const getDateString = (date) => date.toISOString().split('T')[0];
+
+    // Convert a Date object to yyyy-mm-dd (in the timezone of userTimezone)
+  const getDateString = (date) => {
+    try {
+      // Create a string 'YYYY-MM-DD' for the given date in the user's timezone
+      return new Intl.DateTimeFormat('en-CA', { timeZone: userTimezone }).format(date);
+    } catch (e) {
+      return date.toISOString().split('T')[0];
+    }
+  };
+
+  // Friendly label for charts (month short + day)
+  const formatDate = (date) => {
+    try {
+      return new Date(new Intl.DateTimeFormat('en-CA', { timeZone: userTimezone }).format(date)).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    } catch (e) {
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+  };
+
 
   const completionRate = () => {
     if (!habitsDefs || habitsDefs.length === 0) return 0;
@@ -970,10 +1067,10 @@ export default function HabitTracker() {
   /* ---------------------------
     JSX Render (kept mostly unchanged; auth links updated to use BACKEND_URL)
   ----------------------------*/
-  
+
   return (
-    
-  
+
+
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50">
       <StickyNote userId={userId} isLoggedIn={isLoggedIn} corner="bottom-right" />
       {/* Dismissible Toast for Free Tier Notice */}
@@ -1062,6 +1159,27 @@ export default function HabitTracker() {
               </div>
             </div>
 
+            {/* Digital Clock */}
+  <div className="hidden lg:flex items-center gap-2 ml-6 px-4 py-2 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl border border-indigo-200">
+    <Calendar className="w-4 h-4 text-indigo-600" />
+    <div className="text-sm font-semibold text-gray-700">
+      {currentTime.toLocaleTimeString('en-US', { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true,
+        timeZone: userTimezone
+      })}
+    </div>
+    <div className="text-xs text-gray-500 font-medium">
+      {currentTime.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric',
+        timeZone: userTimezone
+      })}
+    </div>
+  </div>
+
             <nav className="hidden md:flex items-center gap-2">
               <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all duration-200">
                 Home
@@ -1092,14 +1210,14 @@ export default function HabitTracker() {
               ) : (
                 <div className="flex items-center gap-3 ml-2">
                   <div className="px-4 py-2 rounded-lg bg-gradient-to-r from-gray-50 to-gray-100 border border-gray-200 text-sm flex items-center gap-3 shadow-sm">
-  <User className="w-4 h-4 text-gray-600" />
-  <span className="truncate max-w-[8rem] font-medium text-gray-700">{userId}</span>
-  {isLocalOnly && (
-    <span className="ml-2 px-2 py-1 text-xs rounded bg-yellow-50 border border-yellow-200 text-yellow-700 font-semibold">
-      {credits} credits
-    </span>
-  )}
-</div>
+                    <User className="w-4 h-4 text-gray-600" />
+                    <span className="truncate max-w-[8rem] font-medium text-gray-700">{userId}</span>
+                    {isLocalOnly && (
+                      <span className="ml-2 px-2 py-1 text-xs rounded bg-yellow-50 border border-yellow-200 text-yellow-700 font-semibold">
+                        {credits} credits
+                      </span>
+                    )}
+                  </div>
 
                   <button onClick={handleLogout} className="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm font-medium flex items-center gap-2 transition-all duration-200">
                     <LogOut className="w-4 h-4" />
@@ -1216,11 +1334,11 @@ export default function HabitTracker() {
                     { title: 'Sleep Logging', desc: 'Hours & quality tracking', icon: Moon, color: 'from-purple-500 to-pink-500' },
                     { title: '30-Day Insights', desc: 'Visualize trends', icon: TrendingUp, color: 'from-green-500 to-emerald-500' },
                     {
-  title: 'Sticky Notes',
-  desc: 'Quick reminders anywhere on screen',
-  icon: Pin,          // or Pin if you're using that instead
-  color: 'from-yellow-400 to-orange-500'
-}
+                      title: 'Sticky Notes',
+                      desc: 'Quick reminders anywhere on screen',
+                      icon: Pin,          // or Pin if you're using that instead
+                      color: 'from-yellow-400 to-orange-500'
+                    }
 
                   ].map((feature, idx) => (
                     <div key={idx} className="p-6 rounded-2xl bg-white shadow-lg border border-gray-100 hover:shadow-xl hover:scale-105 transition-all duration-300 group">
@@ -1524,18 +1642,18 @@ export default function HabitTracker() {
                           </span>
                         </div>
                         <div className="flex items-center gap-2 ml-3">
-  <button
-    onClick={() => openEditHabit(habit)}
-    className="text-gray-500 hover:text-indigo-600 hover:scale-110 transition-all duration-200 p-1 rounded"
-    title="Edit habit (costs 1 credit for local users)"
-  >
-    ✎
-  </button>
+                          <button
+                            onClick={() => openEditHabit(habit)}
+                            className="text-gray-500 hover:text-indigo-600 hover:scale-110 transition-all duration-200 p-1 rounded"
+                            title="Edit habit (costs 1 credit for local users)"
+                          >
+                            ✎
+                          </button>
 
-  <button onClick={() => deleteHabit(habit.id)} className="text-gray-400 hover:text-red-500 hover:scale-110 transition-all duration-200 p-1 rounded">
-    <X className="w-6 h-6" />
-  </button>
-</div>
+                          <button onClick={() => deleteHabit(habit.id)} className="text-gray-400 hover:text-red-500 hover:scale-110 transition-all duration-200 p-1 rounded">
+                            <X className="w-6 h-6" />
+                          </button>
+                        </div>
 
                       </div>
 
@@ -1548,28 +1666,31 @@ export default function HabitTracker() {
 
                           return (
                             <button
-                              key={idx}
-                              onClick={() => isToday && toggleHabit(habit.id)}
-                              disabled={!isToday}
-                              className={`py-4 rounded-xl border-2 transition-all duration-200 text-center group/day relative overflow-hidden ${isCompleted ? 'shadow-md' : 'bg-white hover:bg-gray-50'
-                                } ${isToday ? 'cursor-pointer hover:scale-105 hover:shadow-lg' : 'cursor-default opacity-60'}`}
-                              style={{
-                                backgroundColor: isCompleted ? habit.color : undefined,
-                                color: isCompleted ? 'white' : undefined,
-                                borderColor: isCompleted ? habit.color : '#e5e7eb'
-                              }}
-                              title={isToday ? 'Toggle for today' : 'Locked (past day)'}
-                            >
-                              <div className="text-xs font-bold mb-1">
-                                {date.toLocaleDateString('en-US', { weekday: 'short' })[0]}
-                              </div>
-                              {isCompleted && <Check className="w-5 h-5 mx-auto" />}
-                              {!isCompleted && isToday && (
-                                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/day:opacity-100 transition-opacity duration-200">
-                                  <Plus className="w-5 h-5 text-gray-400" />
-                                </div>
-                              )}
-                            </button>
+  key={idx}
+  onClick={() => isToday && toggleHabit(habit.id)}
+  disabled={!isToday}
+  className={`py-4 rounded-xl border-2 transition-all duration-200 text-center group/day relative overflow-hidden ${isCompleted ? 'shadow-md' : 'bg-white hover:bg-gray-50'
+    } ${isToday ? 'cursor-pointer hover:scale-105 hover:shadow-lg' : 'cursor-default opacity-60'}`}
+  style={{
+    backgroundColor: isCompleted ? habit.color : undefined,
+    color: isCompleted ? 'white' : undefined,
+    borderColor: isCompleted ? habit.color : '#e5e7eb'
+  }}
+  title={`${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}${isToday ? ' - Today (Click to toggle)' : ' - Locked (past day)'}`}
+>
+  <div className="text-xs font-bold mb-1">
+    {date.toLocaleDateString('en-US', { weekday: 'short' })[0]}
+  </div>
+  <div className="text-[10px] font-semibold mb-1 opacity-75">
+    {date.getDate()}
+  </div>
+  {isCompleted && <Check className="w-5 h-5 mx-auto" />}
+  {!isCompleted && isToday && (
+    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/day:opacity-100 transition-opacity duration-200">
+      <Plus className="w-5 h-5 text-gray-400" />
+    </div>
+  )}
+</button>
                           );
                         })}
                       </div>
@@ -1606,8 +1727,44 @@ export default function HabitTracker() {
           <div className="text-xs text-gray-400 font-medium">© {new Date().getFullYear()} Log Daily • Built with ♥</div>
         </div>
       </footer>
+            {/* Timezone Modal (appear once on first run or via settings) */}
+      {showTimezoneModal && (
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-60 p-4">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-2xl font-bold text-gray-900">Select your timezone</h3>
+              <button onClick={() => setShowTimezoneModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-600 mb-4">We detected <strong>{detectedTz}</strong>. Confirm or paste a different IANA timezone (e.g., Asia/Kolkata, America/New_York).</p>
+
+            <div className="mb-4">
+              <input
+                type="text"
+                value={userTimezone}
+                onChange={(e) => setUserTimezone(e.target.value)}
+                className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl mb-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="e.g., Asia/Kolkata"
+              />
+              <p className="text-xs text-gray-500">If you leave this as-is, we will use the detected timezone.</p>
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={() => saveTimezone(userTimezone)} className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-4 py-3 rounded-xl font-semibold">
+                Save timezone
+              </button>
+              <button onClick={() => { setUserTimezone(detectedTz); saveTimezone(detectedTz); }} className="flex-1 bg-gray-100 px-4 py-3 rounded-xl font-semibold">
+                Use detected ({detectedTz})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sleep Modal */}
+
       {showSleepModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-0 sm:p-4 animate-in fade-in duration-200">
           <div className={`bg-white rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md sm:p-8 p-6 shadow-2xl ${isMobile ? 'h-[85%] overflow-auto' : ''} animate-in slide-in-from-bottom sm:slide-in-from-bottom-0 duration-300`}>
@@ -1664,7 +1821,7 @@ export default function HabitTracker() {
           </div>
         </div>
       )}
-            {/* Edit Habit Modal */}
+      {/* Edit Habit Modal */}
       {showEditModal && (
         <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-70 p-4">
           <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl">
@@ -1703,17 +1860,17 @@ export default function HabitTracker() {
             <p className="text-sm text-gray-600 mb-6">Local users have a 6-credit trial for habit add/update. To unlock unlimited habit creation, please sign in with Google.</p>
             <div className="flex gap-3">
               <button
-                    onClick={() => window.location.href = `${BACKEND_URL}/auth/google`}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium hover:shadow-md hover:border-gray-300 transition-all duration-200"
-                  >
-                    <svg className="w-4 h-4" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.5h147.2c-6.4 34.6-25.5 64-54.3 83.7v69.7h87.7c51.2-47.2 81.9-116.5 81.9-198.5z" fill="#4285F4" />
-                      <path d="M272 544.3c73.8 0 135.7-24.4 181-66.4l-87.7-69.7c-24.4 16.3-55.5 26-93.3 26-71.7 0-132.5-48.4-154.3-113.6H27.5v71.6C72.2 483 163.4 544.3 272 544.3z" fill="#34A853" />
-                      <path d="M117.7 326.2c-10.3-30.8-10.3-64 0-94.8V159.8H27.5c-39.8 79.4-39.8 173.5 0 252.9l90.2-86.5z" fill="#FBBC05" />
-                      <path d="M272 107.7c39 0 74 13.4 101.6 39.6l76.2-76.1C407.7 25.8 345.8 0 272 0 163.4 0 72.2 61.3 27.5 159.8l90.2 71.6C139.5 156.1 200.3 107.7 272 107.7z" fill="#EA4335" />
-                    </svg>
-                    <span className="hidden lg:inline">Sign in</span>
-                  </button>
+                onClick={() => window.location.href = `${BACKEND_URL}/auth/google`}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium hover:shadow-md hover:border-gray-300 transition-all duration-200"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 533.5 544.3" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M533.5 278.4c0-17.4-1.6-34.1-4.6-50.4H272v95.5h147.2c-6.4 34.6-25.5 64-54.3 83.7v69.7h87.7c51.2-47.2 81.9-116.5 81.9-198.5z" fill="#4285F4" />
+                  <path d="M272 544.3c73.8 0 135.7-24.4 181-66.4l-87.7-69.7c-24.4 16.3-55.5 26-93.3 26-71.7 0-132.5-48.4-154.3-113.6H27.5v71.6C72.2 483 163.4 544.3 272 544.3z" fill="#34A853" />
+                  <path d="M117.7 326.2c-10.3-30.8-10.3-64 0-94.8V159.8H27.5c-39.8 79.4-39.8 173.5 0 252.9l90.2-86.5z" fill="#FBBC05" />
+                  <path d="M272 107.7c39 0 74 13.4 101.6 39.6l76.2-76.1C407.7 25.8 345.8 0 272 0 163.4 0 72.2 61.3 27.5 159.8l90.2 71.6C139.5 156.1 200.3 107.7 272 107.7z" fill="#EA4335" />
+                </svg>
+                <span className="hidden lg:inline">Sign in</span>
+              </button>
 
               <button onClick={() => setShowOutOfCreditsModal(false)} className="flex-1 bg-gray-100 px-4 py-3 rounded-xl font-semibold">
                 Maybe later
