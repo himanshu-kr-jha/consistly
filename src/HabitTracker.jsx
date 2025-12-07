@@ -354,7 +354,7 @@ export default function HabitTracker() {
   const STICKY_KEY = 'ld_sticky_note_v1';
   const [showWhatsNew, setShowWhatsNew] = useState(false);
 
-  const WHATS_NEW_VERSION = 'v1.2.0'; // Update this when you add new features
+  const WHATS_NEW_VERSION = 'v1.2.1'; // Update this when you add new features
   const WHATS_NEW_KEY = 'ld_whats_new_seen';
 
 
