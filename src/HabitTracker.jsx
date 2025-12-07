@@ -37,6 +37,296 @@ if (typeof window !== 'undefined' && !window.storage) {
     }
   };
 }
+function Avatar({ src, seed, size = 40 }) {
+  if (src) {
+    return <img src={src} alt="avatar" className="rounded-xl" style={{ width: size, height: size, objectFit: 'cover' }} />;
+  }
+  // fallback generated avatar (gradient circle with initials)
+  const hue = (typeof seed === 'number' ? seed : String(seed || '').split('').reduce((s, c) => s + c.charCodeAt(0), 0)) % 360;
+  const initials = (String(seed || 'HB').slice(0, 2) || 'HB').toUpperCase();
+  const style = {
+    width: size,
+    height: size,
+    borderRadius: 10,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontWeight: 700,
+    color: '#fff',
+    background: `linear-gradient(135deg, hsl(${hue} 70% 55%), hsl(${(hue + 40) % 360} 70% 45%))`
+  };
+  return <div style={style}>{initials}</div>;
+}
+
+export function Leaderboard({ currentUserId, initialLimit = 20 }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [limit, setLimit] = useState(initialLimit);
+  const [page, setPage] = useState(1);
+  const [windowDays, setWindowDays] = useState(30);
+  const [totalFetched, setTotalFetched] = useState(0);
+  const [error, setError] = useState(null);
+  const [userPosition, setUserPosition] = useState(null);
+
+  const load = async (opts = {}) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const q = new URLSearchParams({
+        limit: String(opts.limit ?? limit),
+        page: String(opts.page ?? page),
+        windowDays: String(opts.windowDays ?? windowDays)
+      });
+      const resp = await authFetch(`/api/leaderboard?${q.toString()}`, { method: 'GET' });
+      if (!resp) throw new Error('No response');
+
+      const data = resp.data ?? resp?.entries ?? resp;
+      setRows(Array.isArray(data) ? data : []);
+      setTotalFetched(Array.isArray(data) ? data.length : 0);
+
+      // Try to fetch user's position if not in current page
+      if (currentUserId && Array.isArray(data)) {
+        const userInPage = data.find(r => String(r.userId) === String(currentUserId));
+        if (userInPage) {
+          const rank = data.indexOf(userInPage) + 1 + (opts.page ?? page - 1) * (opts.limit ?? limit);
+          setUserPosition({ ...userInPage, rank });
+        } else {
+          // Fetch user's actual position separately if API supports it
+          try {
+            const userResp = await authFetch(`/api/leaderboard/user?windowDays=${opts.windowDays ?? windowDays}`, { method: 'GET' });
+            if (userResp && userResp.rank) {
+              setUserPosition(userResp);
+            }
+          } catch (e) {
+            setUserPosition(null);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Leaderboard load error', err);
+      setError(err.message || 'Failed to load leaderboard');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load({ limit, page, windowDays });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [limit, page, windowDays]);
+
+  const rerenderPage = (p) => {
+    setPage(p);
+    load({ limit, page: p, windowDays });
+  };
+
+  const youIndex = rows.findIndex(r => String(r.userId) === String(currentUserId));
+  const isUserOnPage = youIndex !== -1;
+
+  const getRankBadge = (rank) => {
+    if (rank === 1) return { emoji: '🏆', color: 'from-yellow-400 to-yellow-600', text: 'text-yellow-900' };
+    if (rank === 2) return { emoji: '🥈', color: 'from-gray-300 to-gray-500', text: 'text-gray-900' };
+    if (rank === 3) return { emoji: '🥉', color: 'from-orange-400 to-orange-600', text: 'text-orange-900' };
+    return { emoji: null, color: 'from-gray-100 to-gray-200', text: 'text-gray-700' };
+  };
+
+  return (
+    <div className="bg-gradient-to-br from-white via-indigo-50/30 to-purple-50/30 rounded-3xl shadow-2xl p-6 sm:p-8 border border-indigo-100/50 hover:shadow-3xl transition-all duration-300">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+        <div className="flex items-center gap-3">
+          <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-lg">
+            <Award className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h3 className="text-xl sm:text-2xl font-bold text-gray-800">Leaderboard</h3>
+            <p className="text-xs sm:text-sm text-gray-600">
+              Top performers • Last {windowDays} day{windowDays > 1 ? 's' : ''}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <select
+            value={windowDays}
+            onChange={(e) => { setWindowDays(Number(e.target.value)); setPage(1); }}
+            className="text-sm border-2 border-gray-200 rounded-xl px-4 py-2 bg-white font-medium hover:border-indigo-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all duration-200"
+            aria-label="Time window"
+          >
+            <option value={1}>📅 Today</option>
+            <option value={7}>📊 This Week</option>
+            <option value={30}>📈 This Month</option>
+          </select>
+
+          <select
+            value={limit}
+            onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }}
+            className="text-sm border-2 border-gray-200 rounded-xl px-4 py-2 bg-white font-medium hover:border-indigo-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all duration-200"
+            aria-label="Rows per page"
+          >
+            <option value={10}>Top 10</option>
+            <option value={20}>Top 20</option>
+            <option value={50}>Top 50</option>
+          </select>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="py-16 text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-indigo-200 border-t-indigo-600 mb-4"></div>
+          <p className="text-gray-500 font-medium">Loading rankings...</p>
+        </div>
+      ) : error ? (
+        <div className="py-12 text-center">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <X className="w-8 h-8 text-red-500" />
+          </div>
+          <p className="text-red-600 font-semibold mb-2">Oops! Something went wrong</p>
+          <p className="text-sm text-gray-600">{error}</p>
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="py-16 text-center">
+          <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Award className="w-10 h-10 text-gray-400" />
+          </div>
+          <p className="text-gray-600 font-medium mb-2">No rankings yet</p>
+          <p className="text-sm text-gray-500">Start tracking habits to appear on the leaderboard!</p>
+        </div>
+      ) : (
+        <>
+          <div className="space-y-2 mb-6">
+            {rows.map((row, idx) => {
+              const rank = (page - 1) * limit + idx + 1;
+              const displayName = row.anonymous && row.anonymous.showOnLeaderboard && row.anonymous.displayId
+                ? row.anonymous.displayId
+                : row.name || `User ${rank}`;
+              const isYou = String(row.userId) === String(currentUserId);
+              const badge = getRankBadge(rank);
+
+              return (
+                <div
+                  key={row.userId}
+                  className={`flex items-center gap-3 sm:gap-4 p-4 rounded-2xl border-2 transition-all duration-300 hover:scale-[1.02] ${isYou
+                      ? 'bg-gradient-to-r from-indigo-100 via-purple-100 to-pink-100 border-indigo-300 shadow-lg ring-2 ring-indigo-400/50'
+                      : 'bg-white border-gray-200 hover:border-indigo-200 hover:shadow-md'
+                    }`}
+                >
+                  <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-gradient-to-br ${badge.color} flex items-center justify-center font-bold text-lg sm:text-xl shadow-md ${badge.text}`}>
+                    {badge.emoji || `#${rank}`}
+                  </div>
+
+                  <Avatar 
+  src={row.anonymous && row.anonymous.showOnLeaderboard && row.anonymous.displayId ? null : row.picture} 
+  seed={row.userId} 
+  size={48} 
+/>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <div className="font-bold text-gray-900 truncate text-sm sm:text-base">
+                        {displayName}
+                      </div>
+                      {isYou && (
+                        <span className="px-2 py-0.5 bg-indigo-600 text-white text-xs font-bold rounded-full">YOU</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-gray-600">
+                      <span className="flex items-center gap-1">
+                        <span className="text-orange-500">🔥</span>
+                        {row.currentStreak ?? 0} streak
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3" />
+                        {row.habitCount ?? 0} habits
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <div className="text-xl sm:text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">
+                      {(row.finalScore ?? row.final_score ?? 0).toFixed(0)}
+                    </div>
+                    <div className="text-xs text-gray-500 font-medium">points</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Pagination */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t-2 border-gray-200">
+            <div className="text-sm text-gray-600 font-medium">
+              Showing {(page - 1) * limit + 1}–{(page - 1) * limit + rows.length}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { if (page > 1) rerenderPage(page - 1); }}
+                disabled={page <= 1}
+                className="px-4 py-2 rounded-xl bg-white border-2 border-gray-200 text-gray-700 font-medium hover:border-indigo-300 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+              >
+                ← Prev
+              </button>
+              <div className="px-4 py-2 rounded-xl border-2 border-indigo-500 bg-indigo-50 font-bold text-indigo-700">
+                {page}
+              </div>
+              <button
+                onClick={() => { if (rows.length === limit) rerenderPage(page + 1); }}
+                disabled={rows.length < limit}
+                className="px-4 py-2 rounded-xl bg-white border-2 border-gray-200 text-gray-700 font-medium hover:border-indigo-300 hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+
+          {/* Your Position (when not on page) */}
+          {!isUserOnPage && userPosition && currentUserId && (
+            <div className="mt-6 p-5 rounded-2xl bg-gradient-to-r from-indigo-100 via-purple-100 to-pink-100 border-2 border-indigo-300 shadow-lg animate-in slide-in-from-bottom duration-500">
+              <div className="flex items-center gap-2 mb-3">
+                <Award className="w-5 h-5 text-indigo-600" />
+                <p className="text-sm font-bold text-indigo-900">Your Position</p>
+              </div>
+
+              <div className="flex items-center gap-3 sm:gap-4 p-4 rounded-xl bg-white/80 backdrop-blur-sm border border-indigo-200">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-bold text-white text-lg shadow-md">
+                  #{userPosition.rank}
+                </div>
+
+                <Avatar 
+  src={userPosition.anonymous && userPosition.anonymous.showOnLeaderboard && userPosition.anonymous.displayId ? null : userPosition.picture} 
+  seed={currentUserId} 
+  size={44} 
+/>
+
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-gray-900 truncate text-sm sm:text-base mb-1">
+                    {userPosition.name || 'You'}
+                  </div>
+                  <div className="flex items-center gap-3 text-xs text-gray-600">
+                    <span className="flex items-center gap-1">
+                      🔥 {userPosition.currentStreak ?? 0} streak
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Calendar className="w-3 h-3" />
+                      {userPosition.habitCount ?? 0} habits
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <div className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">
+                    {(userPosition.finalScore ?? userPosition.final_score ?? 0).toFixed(0)}
+                  </div>
+                  <div className="text-xs text-gray-500 font-medium">points</div>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 
 export default function HabitTracker() {
   // IMPORTANT: Include protocol so redirects like /auth/google work correctly
@@ -64,8 +354,8 @@ export default function HabitTracker() {
   const STICKY_KEY = 'ld_sticky_note_v1';
   const [showWhatsNew, setShowWhatsNew] = useState(false);
 
-const WHATS_NEW_VERSION = 'v1.2.0'; // Update this when you add new features
-const WHATS_NEW_KEY = 'ld_whats_new_seen';
+  const WHATS_NEW_VERSION = 'v1.2.0'; // Update this when you add new features
+  const WHATS_NEW_KEY = 'ld_whats_new_seen';
 
 
   // show when user is out of credits and tries to add/update
@@ -121,8 +411,13 @@ const WHATS_NEW_KEY = 'ld_whats_new_seen';
   const [showTimezoneModal, setShowTimezoneModal] = useState(false);
   // helpful flag so we show modal only when user hasn't explicitly chosen TZ
   const tzConfirmedRef = useRef(false);
-const [currentTime, setCurrentTime] = useState(new Date());
-  
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [anonymousSettings, setAnonymousSettings] = useState({
+    showOnLeaderboard: true,
+    displayId: null
+  });
 
   useEffect(() => {
     // If user hasn't confirmed timezone before, show modal once on load
@@ -137,15 +432,15 @@ const [currentTime, setCurrentTime] = useState(new Date());
       // fallback: do nothing
     }
     // Check if user has seen the latest "What's New"
-  try {
-    const seenVersion = localStorage.getItem(WHATS_NEW_KEY);
-    if (seenVersion !== WHATS_NEW_VERSION) {
-      // Show after a short delay so it doesn't conflict with other modals
-      setTimeout(() => setShowWhatsNew(true), 1500);
+    try {
+      const seenVersion = localStorage.getItem(WHATS_NEW_KEY);
+      if (seenVersion !== WHATS_NEW_VERSION) {
+        // Show after a short delay so it doesn't conflict with other modals
+        setTimeout(() => setShowWhatsNew(true), 1500);
+      }
+    } catch (e) {
+      // fallback: do nothing
     }
-  } catch (e) {
-    // fallback: do nothing
-  }
   }, []);
 
 
@@ -239,18 +534,18 @@ const [currentTime, setCurrentTime] = useState(new Date());
   }, [showToast]);
 
   useEffect(() => {
-  const onResize = () => setIsMobile(window.innerWidth < 640);
-  window.addEventListener('resize', onResize);
-  return () => window.removeEventListener('resize', onResize);
-}, []);
+    const onResize = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
-// Update clock every second
-useEffect(() => {
-  const timer = setInterval(() => {
-    setCurrentTime(new Date());
-  }, 1000);
-  return () => clearInterval(timer);
-}, []);
+  // Update clock every second
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (isLoggedIn) loadUserData();
@@ -329,13 +624,13 @@ useEffect(() => {
   };
 
   const dismissWhatsNew = () => {
-  try {
-    localStorage.setItem(WHATS_NEW_KEY, WHATS_NEW_VERSION);
-    setShowWhatsNew(false);
-  } catch (e) {
-    setShowWhatsNew(false);
-  }
-};
+    try {
+      localStorage.setItem(WHATS_NEW_KEY, WHATS_NEW_VERSION);
+      setShowWhatsNew(false);
+    } catch (e) {
+      setShowWhatsNew(false);
+    }
+  };
   const loadLocalUserData = (username) => {
     try {
       const key = localKeyFor(username);
@@ -611,6 +906,12 @@ useEffect(() => {
           setUserName(extended.userInfo.name || '');
           setUserId(extended.userInfo.email || '');
         }
+        // Inside loadUserData function, after setUserName/setUserId
+        if (extended && extended.userInfo && extended.userInfo.anonymous) {
+          setAnonymousSettings(extended.userInfo.anonymous);
+        } else if (data.userInfo && data.userInfo.anonymous) {
+          setAnonymousSettings(data.userInfo.anonymous);
+        }
       } catch (err) {
         // fall back to legacy endpoint if extended fails
         console.warn('Failed to load extended habits view, falling back to /api/user/data', err);
@@ -714,7 +1015,7 @@ useEffect(() => {
   /* ---------------------------
     Date helpers (unchanged)
   ----------------------------*/
-    // Return ISO yyyy-mm-dd for current "day" in the selected timezone
+  // Return ISO yyyy-mm-dd for current "day" in the selected timezone
   function getTodayString() {
     try {
       // 'en-CA' gives 'YYYY-MM-DD' in most engines
@@ -945,7 +1246,7 @@ useEffect(() => {
   /* ---------------------------
     Analytics helpers (unchanged)
   ----------------------------*/
-    const buildBaseDateFromTodayString = (isoDateStr) => {
+  const buildBaseDateFromTodayString = (isoDateStr) => {
     // isoDateStr is 'YYYY-MM-DD' -> create a Date at local midnight (safe canonical)
     // using new Date(`${isoDateStr}T00:00:00`) is fine for our usage (we only need day increments)
     return new Date(`${isoDateStr}T00:00:00`);
@@ -976,7 +1277,7 @@ useEffect(() => {
   };
 
 
-    // Convert a Date object to yyyy-mm-dd (in the timezone of userTimezone)
+  // Convert a Date object to yyyy-mm-dd (in the timezone of userTimezone)
   const getDateString = (date) => {
     try {
       // Create a string 'YYYY-MM-DD' for the given date in the user's timezone
@@ -1167,7 +1468,6 @@ useEffect(() => {
           </div>
         </div>
       )}
-
       <header className="bg-white/80 backdrop-blur-md border-b border-gray-100/50 sticky top-0 z-40 shadow-sm transition-all duration-300">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
@@ -1184,25 +1484,25 @@ useEffect(() => {
             </div>
 
             {/* Digital Clock */}
-  <div className="hidden lg:flex items-center gap-2 ml-6 px-4 py-2 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl border border-indigo-200">
-    <Calendar className="w-4 h-4 text-indigo-600" />
-    <div className="text-sm font-semibold text-gray-700">
-      {currentTime.toLocaleTimeString('en-US', { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true,
-        timeZone: userTimezone
-      })}
-    </div>
-    <div className="text-xs text-gray-500 font-medium">
-      {currentTime.toLocaleDateString('en-US', { 
-        month: 'short', 
-        day: 'numeric',
-        timeZone: userTimezone
-      })}
-    </div>
-  </div>
+            <div className="hidden lg:flex items-center gap-2 ml-6 px-4 py-2 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl border border-indigo-200">
+              <Calendar className="w-4 h-4 text-indigo-600" />
+              <div className="text-sm font-semibold text-gray-700">
+                {currentTime.toLocaleTimeString('en-US', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                  hour12: true,
+                  timeZone: userTimezone
+                })}
+              </div>
+              <div className="text-xs text-gray-500 font-medium">
+                {currentTime.toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  timeZone: userTimezone
+                })}
+              </div>
+            </div>
 
             <nav className="hidden md:flex items-center gap-2">
               <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all duration-200">
@@ -1212,9 +1512,20 @@ useEffect(() => {
                 Insights
               </button>
               <button onClick={() => setShowWhatsNew(true)} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all duration-200 flex items-center gap-1">
-  <Sparkles className="w-4 h-4" />
-  What's New
-</button>
+                <Sparkles className="w-4 h-4" />
+                What's New
+              </button>
+              {/* Leaderboard Button */}
+              {/* Leaderboard Button - Only for logged in users */}
+              {isLoggedIn && (
+                <button
+                  onClick={() => setShowLeaderboard(true)}
+                  className="ml-2 px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 rounded-lg transition-all duration-200 flex items-center gap-2 shadow-md hover:shadow-lg hover:scale-105"
+                >
+                  <Award className="w-4 h-4" />
+                  Rankings
+                </button>
+              )}
 
               {!isLoggedIn ? (
                 <div className="flex items-center gap-2 ml-2">
@@ -1237,21 +1548,24 @@ useEffect(() => {
                 </div>
               ) : (
                 <div className="flex items-center gap-3 ml-2">
-                  <div className="px-4 py-2 rounded-lg bg-gradient-to-r from-gray-50 to-gray-100 border border-gray-200 text-sm flex items-center gap-3 shadow-sm">
-                    <User className="w-4 h-4 text-gray-600" />
-                    <span className="truncate max-w-[8rem] font-medium text-gray-700">{userId}</span>
-                    {isLocalOnly && (
-                      <span className="ml-2 px-2 py-1 text-xs rounded bg-yellow-50 border border-yellow-200 text-yellow-700 font-semibold">
-                        {credits} credits
-                      </span>
-                    )}
-                  </div>
+  <button 
+    onClick={() => setShowProfileModal(true)}
+    className="px-4 py-2 rounded-lg bg-gradient-to-r from-gray-50 to-gray-100 border border-gray-200 hover:border-indigo-300 hover:shadow-md text-sm flex items-center gap-3 shadow-sm transition-all duration-200 hover:scale-105"
+  >
+    <User className="w-4 h-4 text-gray-600" />
+    <span className="truncate max-w-[8rem] font-medium text-gray-700">{userId}</span>
+    {isLocalOnly && (
+      <span className="ml-2 px-2 py-1 text-xs rounded bg-yellow-50 border border-yellow-200 text-yellow-700 font-semibold">
+        {credits} credits
+      </span>
+    )}
+  </button>
 
-                  <button onClick={handleLogout} className="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-sm font-medium flex items-center gap-2 transition-all duration-200">
-                    <LogOut className="w-4 h-4" />
-                    Logout
-                  </button>
-                </div>
+  <button onClick={handleLogout} className="px-4 py-2 rounded-lg bg-gray-100 hover:bg-red-200 text-sm font-medium flex items-center gap-2 transition-all duration-200">
+    <LogOut className="w-4 h-4" />
+    Logout
+  </button>
+</div>
               )}
             </nav>
 
@@ -1274,9 +1588,20 @@ useEffect(() => {
                 Insights
               </button>
               <button onClick={() => { setShowWhatsNew(true); setMobileMenuOpen(false); }} className="text-left px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors flex items-center gap-2">
-  <Sparkles className="w-4 h-4" />
-  What's New
-</button>
+                <Sparkles className="w-4 h-4" />
+                What's New
+              </button>
+              {/* Leaderboard Button for Mobile */}
+              {/* Leaderboard Button - Only for logged in users */}
+              {isLoggedIn && (
+                <button
+                  onClick={() => setShowLeaderboard(true)}
+                  className="ml-2 px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 rounded-lg transition-all duration-200 flex items-center gap-2 shadow-md hover:shadow-lg hover:scale-105"
+                >
+                  <Award className="w-4 h-4" />
+                  Rankings
+                </button>
+              )}
               {!isLoggedIn ? (
                 <>
                   <button onClick={() => { window.location.href = `${BACKEND_URL}/auth/google`; }} className="text-left px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors">
@@ -1288,10 +1613,22 @@ useEffect(() => {
                 </>
               ) : (
                 <div className="flex items-center justify-between px-4 py-2">
-                  <div className="text-sm font-medium">{userId}</div>
-                  <button onClick={() => { handleLogout(); setMobileMenuOpen(false); }} className="text-sm text-red-500 font-medium">
-                    Logout
-                  </button>
+                  <button 
+  onClick={() => { setShowProfileModal(true); setMobileMenuOpen(false); }} 
+  className="w-full text-left px-4 py-3 rounded-lg hover:bg-gray-100 transition-colors flex items-center justify-between group"
+>
+  <div className="flex items-center gap-2">
+    <User className="w-4 h-4 text-gray-600" />
+    <div className="text-sm font-medium">{userId}</div>
+  </div>
+</button>
+<button 
+  onClick={() => { handleLogout(); setMobileMenuOpen(false); }} 
+  className="w-full text-left px-4 py-2 rounded-lg hover:bg-red-50 transition-colors flex items-center gap-2 text-red-500 font-medium"
+>
+  <LogOut className="w-4 h-4" />
+  Logout
+</button>
                 </div>
               )}
             </div>
@@ -1698,31 +2035,31 @@ useEffect(() => {
 
                           return (
                             <button
-  key={idx}
-  onClick={() => isToday && toggleHabit(habit.id)}
-  disabled={!isToday}
-  className={`py-4 rounded-xl border-2 transition-all duration-200 text-center group/day relative overflow-hidden ${isCompleted ? 'shadow-md' : 'bg-white hover:bg-gray-50'
-    } ${isToday ? 'cursor-pointer hover:scale-105 hover:shadow-lg' : 'cursor-default opacity-60'}`}
-  style={{
-    backgroundColor: isCompleted ? habit.color : undefined,
-    color: isCompleted ? 'white' : undefined,
-    borderColor: isCompleted ? habit.color : '#e5e7eb'
-  }}
-  title={`${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}${isToday ? ' - Today (Click to toggle)' : ' - Locked (past day)'}`}
->
-  <div className="text-xs font-bold mb-1">
-    {date.toLocaleDateString('en-US', { weekday: 'short' })[0]}
-  </div>
-  <div className="text-[10px] font-semibold mb-1 opacity-75">
-    {date.getDate()}
-  </div>
-  {isCompleted && <Check className="w-5 h-5 mx-auto" />}
-  {!isCompleted && isToday && (
-    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/day:opacity-100 transition-opacity duration-200">
-      <Plus className="w-5 h-5 text-gray-400" />
-    </div>
-  )}
-</button>
+                              key={idx}
+                              onClick={() => isToday && toggleHabit(habit.id)}
+                              disabled={!isToday}
+                              className={`py-4 rounded-xl border-2 transition-all duration-200 text-center group/day relative overflow-hidden ${isCompleted ? 'shadow-md' : 'bg-white hover:bg-gray-50'
+                                } ${isToday ? 'cursor-pointer hover:scale-105 hover:shadow-lg' : 'cursor-default opacity-60'}`}
+                              style={{
+                                backgroundColor: isCompleted ? habit.color : undefined,
+                                color: isCompleted ? 'white' : undefined,
+                                borderColor: isCompleted ? habit.color : '#e5e7eb'
+                              }}
+                              title={`${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}${isToday ? ' - Today (Click to toggle)' : ' - Locked (past day)'}`}
+                            >
+                              <div className="text-xs font-bold mb-1">
+                                {date.toLocaleDateString('en-US', { weekday: 'short' })[0]}
+                              </div>
+                              <div className="text-[10px] font-semibold mb-1 opacity-75">
+                                {date.getDate()}
+                              </div>
+                              {isCompleted && <Check className="w-5 h-5 mx-auto" />}
+                              {!isCompleted && isToday && (
+                                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/day:opacity-100 transition-opacity duration-200">
+                                  <Plus className="w-5 h-5 text-gray-400" />
+                                </div>
+                              )}
+                            </button>
                           );
                         })}
                       </div>
@@ -1759,7 +2096,186 @@ useEffect(() => {
           <div className="text-xs text-gray-400 font-medium">© {new Date().getFullYear()} Log Daily • Built with ♥</div>
         </div>
       </footer>
-            {/* Timezone Modal (appear once on first run or via settings) */}
+      {/* Leaderboard Overlay Modal */}
+      {showLeaderboard && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl w-full max-w-4xl max-h-[90vh] overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300">
+            <div className="sticky top-0 bg-gradient-to-r from-indigo-600 to-purple-600 p-6 flex items-center justify-between z-10 shadow-lg">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                  <Award className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold text-white">Leaderboard</h2>
+                  <p className="text-sm text-indigo-100">See how you rank against others</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowLeaderboard(false)}
+                className="w-10 h-10 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center transition-all duration-200 hover:scale-110"
+              >
+                <X className="w-6 h-6 text-white" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto max-h-[calc(90vh-100px)] p-6">
+              <Leaderboard currentUserId={userId} initialLimit={20} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Timezone Modal (appear once on first run or via settings) */}
+      {/* Profile Settings Modal */}
+{showProfileModal && (
+  <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
+    <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-300">
+      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-6 rounded-t-3xl">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+              <User className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-white">Profile Settings</h2>
+              <p className="text-sm text-indigo-100">Manage your visibility</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setShowProfileModal(false)}
+            className="w-10 h-10 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center transition-all duration-200"
+          >
+            <X className="w-5 h-5 text-white" />
+          </button>
+        </div>
+      </div>
+
+      <div className="p-6 space-y-6">
+        {/* User Info */}
+        <div className="flex items-center gap-4 p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-2xl border border-gray-200">
+          <Avatar src={null} seed={userId} size={56} />
+          <div>
+            <div className="font-bold text-gray-900">{username || userId}</div>
+            <div className="text-sm text-gray-600">{userId}</div>
+          </div>
+        </div>
+
+        {/* Leaderboard Visibility */}
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1">
+              <h3 className="font-semibold text-gray-900 mb-1 flex items-center gap-2">
+                <Award className="w-5 h-5 text-indigo-600" />
+                Leaderboard Visibility
+              </h3>
+              <p className="text-sm text-gray-600">
+                Choose how you appear on the public leaderboard
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {/* Public Option */}
+            <label className="flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 hover:bg-gray-50"
+              style={{
+                borderColor: anonymousSettings.showOnLeaderboard && !anonymousSettings.displayId ? '#6366f1' : '#e5e7eb',
+                backgroundColor: anonymousSettings.showOnLeaderboard && !anonymousSettings.displayId ? '#eef2ff' : 'white'
+              }}
+            >
+              <input
+                type="radio"
+                name="visibility"
+                checked={anonymousSettings.showOnLeaderboard && !anonymousSettings.displayId}
+                onChange={() => setAnonymousSettings({ showOnLeaderboard: true, displayId: null })}
+                className="mt-1"
+              />
+              <div>
+                <div className="font-semibold text-gray-900">🌍 Public Profile</div>
+                <div className="text-sm text-gray-600">Show your real name on leaderboard</div>
+              </div>
+            </label>
+
+            {/* Anonymous Option */}
+            <label className="flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 hover:bg-gray-50"
+              style={{
+                borderColor: anonymousSettings.showOnLeaderboard && anonymousSettings.displayId ? '#6366f1' : '#e5e7eb',
+                backgroundColor: anonymousSettings.showOnLeaderboard && anonymousSettings.displayId ? '#eef2ff' : 'white'
+              }}
+            >
+              <input
+                type="radio"
+                name="visibility"
+                checked={anonymousSettings.showOnLeaderboard && anonymousSettings.displayId !== null}
+                onChange={() => {
+                  const randomId = `User${Math.floor(Math.random() * 10000)}`;
+                  setAnonymousSettings({ showOnLeaderboard: true, displayId: randomId });
+                }}
+                className="mt-1"
+              />
+              <div className="flex-1">
+                <div className="font-semibold text-gray-900">🎭 Anonymous</div>
+                <div className="text-sm text-gray-600 mb-2">Show with a random display name</div>
+                {anonymousSettings.showOnLeaderboard && anonymousSettings.displayId && (
+                  <input
+                    type="text"
+                    value={anonymousSettings.displayId}
+                    onChange={(e) => setAnonymousSettings({ ...anonymousSettings, displayId: e.target.value })}
+                    placeholder="Display name"
+                    className="w-full px-3 py-2 text-sm border-2 border-indigo-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                )}
+              </div>
+            </label>
+
+            {/* Hidden Option */}
+            <label className="flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 hover:bg-gray-50"
+              style={{
+                borderColor: !anonymousSettings.showOnLeaderboard ? '#6366f1' : '#e5e7eb',
+                backgroundColor: !anonymousSettings.showOnLeaderboard ? '#eef2ff' : 'white'
+              }}
+            >
+              <input
+                type="radio"
+                name="visibility"
+                checked={!anonymousSettings.showOnLeaderboard}
+                onChange={() => setAnonymousSettings({ showOnLeaderboard: false, displayId: null })}
+                className="mt-1"
+              />
+              <div>
+                <div className="font-semibold text-gray-900">🔒 Private</div>
+                <div className="text-sm text-gray-600">Don't show me on leaderboard at all</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        {/* Save Button */}
+        <button
+          onClick={async () => {
+            try {
+              await authFetch('/api/user/profile', {
+                method: 'PATCH',
+                body: JSON.stringify({ anonymous: anonymousSettings })
+              });
+              showSaveStatus('✓ Profile settings saved', 'success');
+              setShowProfileModal(false);
+            } catch (err) {
+              console.error('Failed to save profile settings', err);
+              showSaveStatus('⚠ Failed to save settings', 'error');
+            }
+          }}
+          className="w-full py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-bold hover:from-indigo-700 hover:to-purple-700 shadow-lg hover:shadow-xl transition-all duration-200"
+        >
+          Save Settings
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+{/* Timezone Modal (appear once on first run or via settings) */}
+      {/* Timezone Modal (appear once on first run or via settings) */}
       {showTimezoneModal && (
         <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-60 p-4">
           <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl">
@@ -1913,67 +2429,67 @@ useEffect(() => {
       )}
 
       {/* What's New Modal */}
-{showWhatsNew && (
-  <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
-    <div className="bg-white rounded-3xl p-8 max-w-lg w-full shadow-2xl animate-in zoom-in-95 duration-300 max-h-[90vh] overflow-y-auto">
-      <div className="flex items-start justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500">
-            <Sparkles className="w-6 h-6 text-white" />
+      {showWhatsNew && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-8 max-w-lg w-full shadow-2xl animate-in zoom-in-95 duration-300 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500">
+                  <Sparkles className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-bold text-gray-900">What's New</h3>
+                  <p className="text-sm text-gray-500 font-medium">{WHATS_NEW_VERSION}</p>
+                </div>
+              </div>
+              <button
+                onClick={dismissWhatsNew}
+                className="text-gray-400 hover:text-gray-600 hover:scale-110 transition-all duration-200"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+
+            <div className="space-y-6">
+              {newFeatures.map((feature) => (
+                <div
+                  key={feature.id}
+                  className={`p-4 rounded-2xl bg-gradient-to-br ${feature.bgGradient} border ${feature.borderColor}`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`p-2 rounded-lg ${feature.iconBg} text-white flex-shrink-0 mt-1`}>
+                      <feature.icon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-gray-900 mb-2">{feature.title}</h4>
+                      <p className="text-sm text-gray-600 leading-relaxed">
+                        {feature.description}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-8 flex gap-3">
+              <button
+                onClick={dismissWhatsNew}
+                className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl font-bold hover:from-indigo-700 hover:to-purple-700 shadow-lg hover:shadow-xl transition-all duration-200"
+              >
+                Got it! Let's go 🚀
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-400 text-center mt-4">
+              You can always access this from the "What's New" menu
+            </p>
           </div>
-          <div>
-            <h3 className="text-2xl font-bold text-gray-900">What's New</h3>
-            <p className="text-sm text-gray-500 font-medium">{WHATS_NEW_VERSION}</p>
-          </div>
         </div>
-        <button 
-          onClick={dismissWhatsNew} 
-          className="text-gray-400 hover:text-gray-600 hover:scale-110 transition-all duration-200"
-        >
-          <X className="w-6 h-6" />
-        </button>
-      </div>
+      )}
 
-      
-      <div className="space-y-6">
-  {newFeatures.map((feature) => (
-    <div 
-      key={feature.id} 
-      className={`p-4 rounded-2xl bg-gradient-to-br ${feature.bgGradient} border ${feature.borderColor}`}
-    >
-      <div className="flex items-start gap-3">
-        <div className={`p-2 rounded-lg ${feature.iconBg} text-white flex-shrink-0 mt-1`}>
-          <feature.icon className="w-5 h-5" />
-        </div>
-        <div>
-          <h4 className="font-bold text-gray-900 mb-2">{feature.title}</h4>
-          <p className="text-sm text-gray-600 leading-relaxed">
-            {feature.description}
-          </p>
-        </div>
-      </div>
-    </div>
-  ))}
-</div>
-
-      <div className="mt-8 flex gap-3">
-        <button 
-          onClick={dismissWhatsNew}
-          className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl font-bold hover:from-indigo-700 hover:to-purple-700 shadow-lg hover:shadow-xl transition-all duration-200"
-        >
-          Got it! Let's go 🚀
-        </button>
-      </div>
-
-      <p className="text-xs text-gray-400 text-center mt-4">
-        You can always access this from the "What's New" menu
-      </p>
-    </div>
-  </div>
-)}
-
-{/* Login Modal */}
-{showLoginModal && (
+      {/* Login Modal */}
+      {showLoginModal && (
         <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-60 p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl ring-1 ring-black/5 animate-in zoom-in-95 duration-300">
             <div className="flex items-center justify-between mb-6">

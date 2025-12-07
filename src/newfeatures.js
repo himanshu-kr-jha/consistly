@@ -5,7 +5,17 @@ import {
 } from 'lucide-react';
 const newFeatures = [
   {
-    id: 1,
+  id: 1,
+  icon: TrendingUp,
+  title: '⚡ Anonymous Leaderboard & Ranking',
+  description: 'Opt-in anonymous accounts: hide real names on the leaderboard. Leaderboard shows generated display names (e.g. CalmTiger#824) and avatars so users can compete privately.',
+  bgGradient: 'from-orange-50 to-red-50',
+  borderColor: 'border-orange-200',
+  iconBg: 'bg-orange-500'
+},
+
+  {
+    id: 2,
     icon: Calendar,
     title: '🕐 Live Digital Clock',
     description: 'Stay on track with a real-time clock in the header showing your current time and date. Perfect for quick reference while logging habits!',
@@ -14,7 +24,7 @@ const newFeatures = [
     iconBg: 'bg-blue-500'
   },
   {
-    id: 2,
+    id: 3,
     icon: Calendar,
     title: '📅 Date Labels on Habit Blocks',
     description: 'Each habit tracking block now shows the date number (1-31) so you always know exactly which day you\'re logging. No more confusion!',
@@ -23,7 +33,7 @@ const newFeatures = [
     iconBg: 'bg-purple-500'
   },
   {
-    id: 3,
+    id: 4,
     icon: Pin,
     title: '📝 Sticky Notes Feature',
     description: 'Add quick reminders and notes that stick to your screen! Perfect for jotting down goals, motivation, or important reminders while tracking habits.',
@@ -31,14 +41,6 @@ const newFeatures = [
     borderColor: 'border-green-200',
     iconBg: 'bg-green-500'
   },
-//   {
-//     id: 4,
-//     icon: TrendingUp,
-//     title: '⚡ Enhanced Tooltips',
-//     description: 'Hover over any habit block to see the full date and status. Tooltips now show complete information including year for better clarity.',
-//     bgGradient: 'from-orange-50 to-red-50',
-//     borderColor: 'border-orange-200',
-//     iconBg: 'bg-orange-500'
-//   }
+
 ];
 export default newFeatures;
