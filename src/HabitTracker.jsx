@@ -12,7 +12,7 @@ import { setAuthToken, getAuthToken, authFetch } from './api';
 import StickyNote from './StickyNotes';
 
 import newFeatures from './newfeatures';
-
+import DailyReminderSection from './DailyReminderSection';
 // Toast JSX (place at the top of your return/render)
 // localStorage polyfill (unchanged)
 if (typeof window !== 'undefined' && !window.storage) {
@@ -356,8 +356,7 @@ export default function HabitTracker() {
 
   const WHATS_NEW_VERSION = 'v1.2.1'; // Update this when you add new features
   const WHATS_NEW_KEY = 'ld_whats_new_seen';
-
-
+  const [dailyReminderTime, setDailyReminderTime] = useState('');
   // show when user is out of credits and tries to add/update
   const [showOutOfCreditsModal, setShowOutOfCreditsModal] = useState(false);
 
@@ -2249,6 +2248,13 @@ export default function HabitTracker() {
             </label>
           </div>
         </div>
+        <DailyReminderSection 
+    time={dailyReminderTime}
+    setTime={setDailyReminderTime}
+    isLoggedIn={isLoggedIn}
+    authFetch={authFetch}
+    showSaveStatus={showSaveStatus}
+  />
 
         {/* Save Button */}
         <button
@@ -2256,7 +2262,9 @@ export default function HabitTracker() {
             try {
               await authFetch('/api/user/profile', {
                 method: 'PATCH',
-                body: JSON.stringify({ anonymous: anonymousSettings })
+                body: JSON.stringify({ anonymous: anonymousSettings,
+                  dailyReminderTime: dailyReminderTime
+                })
               });
               showSaveStatus('✓ Profile settings saved', 'success');
               setShowProfileModal(false);
