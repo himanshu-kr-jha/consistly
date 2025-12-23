@@ -1,7 +1,7 @@
 // Features list for What's New modal
 import {
   Calendar, TrendingUp, Award, Plus, X, Check, Moon,
-  BarChart3, User, LogIn, LogOut, Info, Menu, Sparkles, Pin,
+  BarChart3, User, LogIn, LogOut, Info, Menu, Sparkles, Pin,Bell
 } from 'lucide-react';
 const newFeatures = [
   {
