@@ -13,6 +13,12 @@ import StickyNote from './StickyNotes';
 
 import newFeatures from './newfeatures';
 import DailyReminderSection from './DailyReminderSection';
+// 🔥 Insights Components
+import TodayInsightCard from './components/TodayInsightCard';
+import WeeklyInsightPanel from './components/WeeklyInsightPanel';
+import MonthlyInsightPanel from './components/MonthlyInsightPanel';
+import CoachInsightCard from './components/CoachInsightCard';
+
 // Toast JSX (place at the top of your return/render)
 // localStorage polyfill (unchanged)
 if (typeof window !== 'undefined' && !window.storage) {
@@ -37,6 +43,22 @@ if (typeof window !== 'undefined' && !window.storage) {
     }
   };
 }
+// ---------- Get entries from last N days ----------
+function getLastNDaysEntries(allEntries, days) {
+  if (!allEntries?.length) return [];
+  // ---------- Today Date (YYYY-MM-DD) ----------
+  const todayDate = new Date().toISOString().slice(0, 10);
+
+  const today = new Date(todayDate);
+  const start = new Date(today);
+  start.setDate(start.getDate() - (days - 1));
+
+  return allEntries.filter(e => {
+    const d = new Date(e.date);
+    return d >= start && d <= today;
+  });
+}
+
 function Avatar({ src, seed, size = 40 }) {
   if (src) {
     return <img src={src} alt="avatar" className="rounded-xl" style={{ width: size, height: size, objectFit: 'cover' }} />;
@@ -334,13 +356,21 @@ export default function HabitTracker() {
   const BACKEND_URL = 'https://api-logdaily-com.onrender.com'; // <-- changed (was 'logdaily.com/api')
   const SYNC_QUEUE_KEY = 'ld_sync_queue_v1';
   const SYNC_INTERVAL_MS = 15000;
+// ---------- Today Date (YYYY-MM-DD) ----------
+const todayDate = new Date().toISOString().slice(0, 10);
 
   const [userId, setUserId] = useState('');
   const [username, setUserName] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   // habitsDefs expects local shape { id: habitId, name, color, createdAt, days? }
   const [habitsDefs, setHabitsDefs] = useState([]);
+  const habitCount = habitsDefs?.length || 0;
   const [entries, setEntries] = useState([]);
+  // ---------- Sort entries by date (ascending) ----------
+const sortedEntries = [...(entries || [])].sort(
+  (a, b) => new Date(a.date) - new Date(b.date)
+);
+
   const [todayEntry, setTodayEntry] = useState({
     date: getTodayString(),
     completedHabits: [],
@@ -384,9 +414,12 @@ export default function HabitTracker() {
   const [editHabitId, setEditHabitId] = useState(null);
   const [editHabitName, setEditHabitName] = useState('');
   const [editHabitColor, setEditHabitColor] = useState(selectedColor);
+  // ---------- Habit Count (for Insights) ----------
+
 
   // prefix for localStorage keys for local-only users
   const LOCAL_PREFIX = 'ld_local_user_'; // full key: ld_local_user_<username>
+
 
 
   const colors = ['#6366f1', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#f97316'];
@@ -413,6 +446,7 @@ export default function HabitTracker() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  
   const [anonymousSettings, setAnonymousSettings] = useState({
     showOnLeaderboard: true,
     displayId: null
@@ -441,6 +475,31 @@ export default function HabitTracker() {
       // fallback: do nothing
     }
   }, []);
+  // ---------- Insight Overlay State ----------
+const [showInsightOverlay, setShowInsightOverlay] = useState(false);
+const [activeInsightTab, setActiveInsightTab] = useState('today');
+
+
+// ---------- Insight Time Windows ----------
+const last7DaysEntries = getLastNDaysEntries(sortedEntries, 7);
+const last30DaysEntries = getLastNDaysEntries(sortedEntries, 30);
+
+// Previous 30 days (for monthly comparison)
+const prev30DaysEntries = (() => {
+  if (!sortedEntries.length) return [];
+
+  const today = new Date(todayDate);
+  const end = new Date(today);
+  end.setDate(end.getDate() - 30);
+
+  const start = new Date(end);
+  start.setDate(start.getDate() - 29);
+
+  return sortedEntries.filter(e => {
+    const d = new Date(e.date);
+    return d >= start && d <= end;
+  });
+})();
 
 
   /* ---------------------------
@@ -1504,12 +1563,18 @@ export default function HabitTracker() {
             </div>
 
             <nav className="hidden md:flex items-center gap-2">
-              <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all duration-200">
-                Home
-              </button>
-              <button onClick={() => setShowVisualization(true)} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all duration-200">
+              {/* 🧠 Open Insights */}
+<button
+  onClick={() => setShowInsightOverlay(true)}
+  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition"
+>
+  <Sparkles size={16} />
+  Insights
+</button>
+
+              {/* <button onClick={() => setShowVisualization(true)} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all duration-200">
                 Insights
-              </button>
+              </button> */}
               <button onClick={() => setShowWhatsNew(true)} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all duration-200 flex items-center gap-1">
                 <Sparkles className="w-4 h-4" />
                 What's New
@@ -1637,6 +1702,7 @@ export default function HabitTracker() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-32 pt-6">
+        
         {/* Landing Hero */}
         {!isLoggedIn && (
           <section className="mt-6 bg-gradient-to-br from-indigo-50 via-white to-purple-50 rounded-3xl shadow-2xl p-8 sm:p-12 border border-indigo-100/50 mb-8 overflow-hidden relative group">
@@ -1728,6 +1794,7 @@ export default function HabitTracker() {
           <>
             {/* Header Controls */}
             <div className="mb-6">
+              
               <div className={`flex ${isMobile ? 'flex-col gap-4' : 'flex-row items-center justify-between'} mb-4`}>
                 <div>
                   <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 mb-1">
@@ -1766,7 +1833,9 @@ export default function HabitTracker() {
 
             {/* Visualizations */}
             {showVisualization && (
+              
               <div className="mb-8 space-y-6 animate-in fade-in slide-in-from-top duration-500">
+                
                 <div className="bg-white rounded-2xl shadow-xl p-6 sm:p-8 border border-gray-100 hover:shadow-2xl transition-shadow duration-300">
                   <h3 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
                     <TrendingUp className="w-6 h-6 text-indigo-600" />
@@ -2542,6 +2611,70 @@ export default function HabitTracker() {
           </div>
         </div>
       )}
+      {showInsightOverlay && (
+  <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center px-4">
+    <div className="bg-white w-full max-w-3xl rounded-2xl shadow-xl overflow-hidden">
+
+      {/* ---------- Header ---------- */}
+      <div className="flex items-center justify-between px-6 py-4 border-b">
+        <h2 className="text-lg font-semibold flex items-center gap-2">
+          <Sparkles size={18} className="text-indigo-600" />
+          Your Insights
+        </h2>
+        <button
+          onClick={() => setShowInsightOverlay(false)}
+          className="text-gray-500 hover:text-gray-800"
+        >
+          <X size={20} />
+        </button>
+      </div>
+
+      {/* ---------- Tabs ---------- */}
+      <div className="flex gap-2 px-6 py-3 border-b bg-gray-50 text-sm">
+        {['today', 'weekly', 'monthly', 'coach'].map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveInsightTab(tab)}
+            className={`px-3 py-1.5 rounded-lg capitalize transition ${
+              activeInsightTab === tab
+                ? 'bg-indigo-600 text-white'
+                : 'text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {/* ---------- Content ---------- */}
+      <div className="p-6 max-h-[70vh] overflow-y-auto space-y-6">
+
+        {activeInsightTab === 'today' && (
+          <TodayInsightCard
+            todayEntry={todayEntry}
+            habitCount={habitCount}
+          />
+        )}
+
+        {activeInsightTab === 'weekly' && (
+          <WeeklyInsightPanel
+            entries={last7DaysEntries}
+            habitCount={habitCount}
+          />
+        )}
+
+        {activeInsightTab === 'monthly' && (
+          <MonthlyInsightPanel
+            currentMonth={last30DaysEntries}
+            lastMonth={prev30DaysEntries}
+          />
+        )}
+
+      </div>
+    </div>
+  </div>
+)}
+
     </div>
   );
 }
